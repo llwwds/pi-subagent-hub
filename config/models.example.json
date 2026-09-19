@@ -1,0 +1,19 @@
+{
+  "providers": {
+    "example-openai-compatible": {
+      "baseUrl": "https://api.example.com/v1",
+      "api": "openai-completions",
+      "apiKey": "!security find-generic-password -ws 'pihub-example-openai-compatible'",
+      "models": [
+        {
+          "id": "example-model",
+          "name": "Example Model",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        }
+      ]
+    }
+  }
+}

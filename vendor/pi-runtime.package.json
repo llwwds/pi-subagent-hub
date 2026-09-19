@@ -1,0 +1,10 @@
+{
+  "name": "pi-subagent-hub-pi-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1"
+  }
+}

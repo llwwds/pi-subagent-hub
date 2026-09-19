@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="pihub-token" content="__PIHUB_TOKEN__">
+    <title>Pi Subagent Hub</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="scanline" aria-hidden="true"></div>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">π</span>
+        <div>
+          <p>PI SUBAGENT HUB</p>
+          <span>LOCAL CONTROL DECK · 1.0.0.0</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="connection" class="connection"><i></i> CONNECTING</span>
+        <button id="refresh" class="button button-quiet" type="button">REFRESH</button>
+        <button id="new-agent" class="button button-primary" type="button">+ NEW AGENT</button>
+      </div>
+    </header>
+
+    <section class="metrics" aria-label="Agent overview">
+      <article><span>TOTAL</span><strong id="metric-total">0</strong></article>
+      <article><span>RUNNING</span><strong id="metric-running">0</strong></article>
+      <article><span>IDLE</span><strong id="metric-idle">0</strong></article>
+      <article><span>NEEDS INPUT</span><strong id="metric-waiting">0</strong></article>
+      <article><span>FAULTED</span><strong id="metric-faulted">0</strong></article>
+      <article class="profile-metric"><span>PROFILE DIGEST</span><code id="profile-digest">—</code></article>
+    </section>
+
+    <aside class="risk-strip">
+      <b>BOUNDARY NOTE</b>
+      独立 context 与进程不等于文件系统沙箱。标记为 SHARED CWD 的 agent 可能看到并覆盖彼此的文件变更。
+    </aside>
+
+    <main class="workspace">
+      <section class="agent-rail" aria-label="Agents">
+        <div class="section-head">
+          <div><span>FLEET</span><small id="agent-count">0 AGENTS</small></div>
+          <input id="filter" type="search" placeholder="FILTER BY NAME / ID" aria-label="Filter agents">
+        </div>
+        <div id="agent-list" class="agent-list"></div>
+      </section>
+
+      <section id="detail" class="detail" aria-live="polite">
+        <div id="empty-state" class="empty-state">
+          <span class="empty-glyph">⌁</span>
+          <h1>NO AGENT SELECTED</h1>
+          <p>Choose an agent from the fleet or create a new managed Pi worker.</p>
+        </div>
+
+        <div id="agent-detail" class="agent-detail hidden">
+          <div class="detail-head">
+            <div>
+              <div class="eyebrow">SELECTED AGENT</div>
+              <h1 id="detail-name">—</h1>
+              <code id="detail-id">—</code>
+            </div>
+            <div class="detail-actions">
+              <button class="button button-quiet" data-action="restart" type="button">RESTART</button>
+              <button class="button button-warn" data-action="abort" type="button">ABORT TURN</button>
+              <button class="button button-danger" data-action="stop" type="button">STOP</button>
+            </div>
+          </div>
+
+          <div class="spec-grid">
+            <article><span>STATUS</span><strong id="detail-status">—</strong></article>
+            <article><span>MODEL</span><strong id="detail-model">UNSET</strong></article>
+            <article><span>THINKING</span><strong id="detail-thinking">DEFAULT</strong></article>
+            <article><span>PID</span><strong id="detail-pid">—</strong></article>
+            <article class="wide"><span>WORKING DIRECTORY</span><code id="detail-cwd">—</code></article>
+            <article class="wide"><span>SESSION</span><code id="detail-session">—</code></article>
+          </div>
+
+          <section class="event-section">
+            <div class="section-head inline">
+              <div><span>EVENT STREAM</span><small id="event-count">0 EVENTS</small></div>
+              <label class="toggle"><input id="verbose-events" type="checkbox"> RAW PAYLOAD</label>
+            </div>
+            <div id="events" class="events"></div>
+          </section>
+
+          <form id="message-form" class="command-dock">
+            <label for="message">COMMAND CHANNEL</label>
+            <textarea id="message" rows="3" placeholder="Send a prompt, steering instruction, or follow-up…" required></textarea>
+            <div>
+              <select id="message-kind" aria-label="Message kind">
+                <option value="prompt">PROMPT</option>
+                <option value="steer">STEER</option>
+                <option value="follow-up">FOLLOW-UP</option>
+              </select>
+              <button class="button button-primary" type="submit">TRANSMIT ↗</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="create-dialog">
+      <form id="create-form" method="dialog">
+        <div class="dialog-head">
+          <div><span>PROVISION WORKER</span><h2>NEW PI SUBAGENT</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <label>DISPLAY NAME<input name="name" required placeholder="reviewer-a"></label>
+        <label>WORKING DIRECTORY<input name="cwd" required placeholder="/absolute/path/to/project"></label>
+        <div class="form-row">
+          <label>MODEL<input name="model" placeholder="provider/model-id"></label>
+          <label>THINKING<select name="thinking"><option value="">DEFAULT</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
+        </div>
+        <label>INITIAL PROMPT<textarea name="prompt" rows="4" placeholder="Optional — start the first turn immediately"></textarea></label>
+        <label class="check"><input name="confirmShared" type="checkbox" required> I understand this initial version uses the supplied directory as a shared workspace and does not provide filesystem sandboxing.</label>
+        <div class="dialog-actions">
+          <button class="button button-quiet" value="cancel">CANCEL</button>
+          <button class="button button-primary" value="default" type="submit">CREATE AGENT</button>
+        </div>
+        <p id="create-error" class="form-error" role="alert"></p>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

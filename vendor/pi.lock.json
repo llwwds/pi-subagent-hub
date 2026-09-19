@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "upstream": "https://github.com/earendil-works/pi.git",
+  "tag": "v0.85.1",
+  "commit": "d981de1229ef899957bbe968bc8dcda02a21f477",
+  "retrievedAt": "2026-09-19",
+  "nodeEngine": ">=22.19.0",
+  "packages": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1"
+  }
+}

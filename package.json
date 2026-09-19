@@ -1,0 +1,37 @@
+{
+  "name": "pi-subagent-hub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local control plane for isolated Pi Agent subagents",
+  "author": "llwwds",
+  "license": "MIT",
+  "keywords": [
+    "agent",
+    "cli",
+    "multi-agent",
+    "pi-agent",
+    "subagent"
+  ],
+  "packageManager": "npm@11.12.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/llwwds/pi-subagent-hub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/llwwds/pi-subagent-hub/issues"
+  },
+  "homepage": "https://github.com/llwwds/pi-subagent-hub#readme",
+  "type": "module",
+  "bin": {
+    "pihub": "bin/pihub.js"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "bootstrap:pi": "node scripts/bootstrap-pi.js",
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check-sources.js && node scripts/check-release.js && node --test test/*.test.js",
+    "smoke:pi": "node scripts/smoke-pi-rpc.js"
+  }
+}

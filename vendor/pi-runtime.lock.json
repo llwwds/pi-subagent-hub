@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "registry": "https://registry.npmjs.org",
+  "retrievedAt": "2026-09-19",
+  "packages": {
+    "@earendil-works/pi-coding-agent": {
+      "version": "0.85.1",
+      "integrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ=="
+    },
+    "@earendil-works/pi-agent-core": {
+      "version": "0.85.1",
+      "integrity": "sha512-hIXIP3eAWueAYiAl8aMvWCvvZ8Q5gT3Dip5bE5uJyIGh4+YlWRjtMLI4BaeoXoSs93zndjue61u1B/vhefLnuA=="
+    },
+    "@earendil-works/pi-tui": {
+      "version": "0.85.1",
+      "integrity": "sha512-OIzw9efInmO4WOBnD4TxcTdBjmzvYJpzslkgoUro946nEGoYWg5rwv1p4fDt3/JvMx9QybryUCUwlm7j8Dreig=="
+    }
+  }
+}

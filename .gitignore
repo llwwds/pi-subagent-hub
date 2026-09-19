@@ -1,0 +1,19 @@
+.DS_Store
+node_modules/
+dist/
+coverage/
+.cache/
+.tmp/
+*.log
+
+# Local runtime state and credentials
+.pihub/
+config.local.json
+*.local.json
+.env
+.env.*
+!.env.example
+
+# Independently downloaded upstream Pi checkout
+vendor/pi/
+vendor/pi-runtime/
