@@ -87,7 +87,23 @@ export function publicAgent(agent) {
     tools_json: _toolsJson,
     skills_json: _skillsJson,
     extensions_json: _extensionsJson,
+    carrier: _carrier,
+    skill_authorization_json: _skillAuthorizationJson,
+    skill_authorization: _skillAuthorization,
     ...safe
   } = agent;
   return safe;
+}
+
+export function publicAgentV2(agent) {
+  if (!agent) return null;
+  const authorization = agent.skill_authorization;
+  const skillIds = authorization?.grants?.map((grant) => grant.id) || [];
+  return {
+    ...publicAgent(agent),
+    carrier: agent.carrier || "pi",
+    skillPolicy: authorization ? { mode: authorization.mode, ids: skillIds } : { mode: "legacy", ids: skillIds },
+    skillIds,
+    skillDigest: authorization?.digest || null,
+  };
 }

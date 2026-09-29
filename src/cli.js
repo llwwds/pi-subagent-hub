@@ -29,6 +29,18 @@ Usage:
   pihub panel [--no-open]
   pihub doctor [--json]
   pihub config init|validate|paths [--json]
+  pihub carriers list [--json]
+  pihub providers list [--json]
+  pihub providers add --stdin [--json]  # JSON with app, URL, models and API key
+  pihub providers switch --app pi|codex|claude --id ID [--json]
+  pihub skills list|import --id ID --source DIR [--label NAME] [--json]
+  pihub agents create --carrier pi|codex|claude --name NAME --cwd DIR [--skills all|none|ID,ID] [--json]
+  pihub agents create --manifest FILE|- [--json]
+  pihub agents list|inspect AGENT_ID [--json]
+  pihub agents prompt AGENT_ID [TEXT|--stdin] [--json]
+  pihub agents wait AGENT_ID... [--timeout SECONDS] [--json]
+  pihub agents logs AGENT_ID [--after CURSOR] [--json]
+  pihub agents abort|stop|restart AGENT_ID [--json]
 
 Machine interface:
   --json keeps stdout as one stable JSON envelope. Diagnostics go to stderr.
@@ -123,6 +135,49 @@ function normalizeCreateSpec(options) {
   };
 }
 
+function normalizeSkillPolicy(value) {
+  if (!value || value === "all") return { mode: "all" };
+  return { mode: "only", ids: value === "none" ? [] : value.split(",").map((id) => id.trim()) };
+}
+
+function normalizePlatformSpec(options) {
+  return {
+    ...normalizeCreateSpec(options),
+    carrier: options.carrier || "pi",
+    skillPolicy: normalizeSkillPolicy(options.skills),
+  };
+}
+
+async function createPlatformFromManifest(client, path) {
+  const raw = path === "-" ? readStdin() : readFileSync(path, "utf8");
+  const manifest = JSON.parse(raw);
+  if (manifest.schemaVersion !== 2 || !Array.isArray(manifest.agents)) {
+    throw new Error("platform manifest must have schemaVersion 2 and an agents array");
+  }
+  const results = [];
+  for (const item of manifest.agents) {
+    try {
+      const parsedModel = typeof item.model === "object" ? item.model : parseModel(item.model);
+      const created = await client.request("POST", "/v2/agents", {
+        agentId: item.agentId,
+        name: item.name,
+        cwd: item.cwd,
+        workspaceMode: item.workspaceMode || "shared",
+        provider: parsedModel?.provider || item.provider,
+        model: parsedModel?.id || parsedModel?.model || null,
+        thinking: parsedModel?.thinking || item.thinking,
+        prompt: item.prompt,
+        carrier: item.carrier || "pi",
+        skillPolicy: item.skillPolicy || { mode: "all" },
+      });
+      results.push({ ok: true, agentId: created.id, agent: created });
+    } catch (error) {
+      results.push({ ok: false, agentId: item.agentId || null, error: { code: error.code || "create_failed", message: error.message } });
+    }
+  }
+  return { groupName: manifest.groupName || null, results };
+}
+
 async function createFromManifest(client, path) {
   const raw = path === "-" ? readStdin() : readFileSync(path, "utf8");
   const manifest = JSON.parse(raw);
@@ -151,11 +206,11 @@ async function createFromManifest(client, path) {
   return { groupName: manifest.groupName || null, results };
 }
 
-async function waitForAgents(client, ids, timeoutSeconds) {
+async function waitForAgents(client, ids, timeoutSeconds, apiVersion = "v1") {
   const deadline = Date.now() + timeoutSeconds * 1000;
   const settled = new Set(["idle", "stopped", "crashed", "failed", "waiting_input"]);
   while (Date.now() < deadline) {
-    const agents = await Promise.all(ids.map((id) => client.request("GET", `/v1/agents/${encodeURIComponent(id)}`)));
+    const agents = await Promise.all(ids.map((id) => client.request("GET", `/${apiVersion}/agents/${encodeURIComponent(id)}`)));
     if (agents.every((agent) => settled.has(agent.status))) return agents;
     await sleep(250);
   }
@@ -208,7 +263,7 @@ export async function main(argv) {
 
   const command = argv[0];
   const subcommand = argv[1];
-  const parsed = parseArgs(argv.slice(command === "daemon" || command === "config" ? 2 : 1));
+  const parsed = parseArgs(argv.slice(new Set(["daemon", "config", "carriers", "providers", "skills", "agents"]).has(command) ? 2 : 1));
   const paths = resolveHubPaths(process.env.PIHUB_HOME);
   const jsonMode = Boolean(parsed.options.json);
 
@@ -239,6 +294,66 @@ export async function main(argv) {
   }
 
   const client = new HubClient(paths);
+  if (command === "carriers" && subcommand === "list") {
+    return output(await client.request("GET", "/v2/carriers"), jsonMode);
+  }
+  if (command === "providers" && subcommand === "list") {
+    return output(await client.request("GET", "/v2/providers"), jsonMode);
+  }
+  if (command === "providers" && subcommand === "add") {
+    if (!parsed.options.stdin) throw new Error("providers add requires --stdin so credentials do not enter command history");
+    return output(await client.request("POST", "/v2/providers", JSON.parse(readStdin())), jsonMode);
+  }
+  if (command === "providers" && subcommand === "switch") {
+    if (!parsed.options.app || !parsed.options.id) throw new Error("providers switch requires --app and --id");
+    return output(await client.request("POST", `/v2/providers/${encodeURIComponent(parsed.options.app)}/${encodeURIComponent(parsed.options.id)}/switch`, {}), jsonMode);
+  }
+  if (command === "skills" && subcommand === "list") {
+    return output(await client.request("GET", "/v2/skills"), jsonMode);
+  }
+  if (command === "skills" && subcommand === "import") {
+    if (!parsed.options.id || !parsed.options.source) throw new Error("skills import requires --id and --source");
+    return output(await client.request("POST", "/v2/skills/import", {
+      id: parsed.options.id,
+      sourcePath: parsed.options.source,
+      ...(parsed.options.label ? { sourceLabel: parsed.options.label } : {}),
+    }), jsonMode);
+  }
+  if (command === "agents" && subcommand === "create") {
+    if (parsed.options.manifest) return output(await createPlatformFromManifest(client, parsed.options.manifest), jsonMode);
+    return output(await client.request("POST", "/v2/agents", normalizePlatformSpec(parsed.options)), jsonMode);
+  }
+  if (command === "agents" && subcommand === "list") {
+    const snapshot = await client.request("GET", "/v2/snapshot");
+    return output(snapshot.agents, jsonMode);
+  }
+  if (command === "agents" && subcommand === "inspect") {
+    const id = parsed.positional[0];
+    if (!id) throw new Error("agents inspect requires AGENT_ID");
+    return output(await client.request("GET", `/v2/agents/${encodeURIComponent(id)}`), jsonMode);
+  }
+  if (command === "agents" && subcommand === "prompt") {
+    const id = parsed.positional.shift();
+    if (!id) throw new Error("agents prompt requires AGENT_ID");
+    const message = parsed.options.stdin ? readStdin() : parsed.positional.join(" ");
+    return output(await client.request("POST", `/v2/agents/${encodeURIComponent(id)}/prompt`, { message }), jsonMode);
+  }
+  if (command === "agents" && subcommand === "wait") {
+    if (!parsed.positional.length) throw new Error("agents wait requires AGENT_ID");
+    const timeout = Number(parsed.options.timeout || 120);
+    return output(await waitForAgents(client, parsed.positional, timeout, "v2"), jsonMode);
+  }
+  if (command === "agents" && subcommand === "logs") {
+    const id = parsed.positional[0];
+    if (!id) throw new Error("agents logs requires AGENT_ID");
+    const after = parsed.options.after || 0;
+    return output(await client.request("GET", `/v2/agents/${encodeURIComponent(id)}/events?after=${after}`), jsonMode);
+  }
+  if (command === "agents" && new Set(["abort", "stop", "restart"]).has(subcommand)) {
+    const id = parsed.positional[0];
+    if (!id) throw new Error(`agents ${subcommand} requires AGENT_ID`);
+    return output(await client.request("POST", `/v2/agents/${encodeURIComponent(id)}/${subcommand}`, {}), jsonMode);
+  }
   if (command === "spawn") {
     if (parsed.options.manifest) return output(await createFromManifest(client, parsed.options.manifest), jsonMode);
     return output(await client.request("POST", "/v1/agents", normalizeCreateSpec(parsed.options)), jsonMode);

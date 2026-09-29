@@ -4,122 +4,200 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="pihub-token" content="__PIHUB_TOKEN__">
-    <title>Pi Subagent Hub</title>
+    <meta name="theme-color" content="#08090b">
+    <title>Subagent Hub · 控制台</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <div class="scanline" aria-hidden="true"></div>
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark">π</span>
-        <div>
-          <p>PI SUBAGENT HUB</p>
-          <span>LOCAL CONTROL DECK · 1.0.0.0</span>
-        </div>
-      </div>
+      <a class="brand" href="/" aria-label="Subagent Hub 首页">
+        <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-wordmark">SUBAGENT <b>HUB</b><small>CONTROL PLANE / 2.0</small></span>
+      </a>
+      <nav class="main-nav" aria-label="主导航">
+        <button class="nav-item active" type="button" data-view="agents" aria-current="page">Agents</button>
+        <button class="nav-item" type="button" data-view="skills">Skill 广场 <span id="nav-skill-count">0</span></button>
+        <button class="nav-item" type="button" data-view="providers">供应商 / CC Switch</button>
+      </nav>
       <div class="top-actions">
-        <span id="connection" class="connection"><i></i> CONNECTING</span>
-        <button id="refresh" class="button button-quiet" type="button">REFRESH</button>
-        <button id="new-agent" class="button button-primary" type="button">+ NEW AGENT</button>
+        <span id="connection" class="connection connecting"><i></i>正在连接</span>
+        <button id="refresh" class="icon-action" type="button" title="立即同步" aria-label="立即同步">↻</button>
+        <button id="new-agent" class="button button-primary" type="button"><span>＋</span> 创建 Agent</button>
       </div>
     </header>
 
-    <section class="metrics" aria-label="Agent overview">
-      <article><span>TOTAL</span><strong id="metric-total">0</strong></article>
-      <article><span>RUNNING</span><strong id="metric-running">0</strong></article>
-      <article><span>IDLE</span><strong id="metric-idle">0</strong></article>
-      <article><span>NEEDS INPUT</span><strong id="metric-waiting">0</strong></article>
-      <article><span>FAULTED</span><strong id="metric-faulted">0</strong></article>
-      <article class="profile-metric"><span>PROFILE DIGEST</span><code id="profile-digest">—</code></article>
-    </section>
-
-    <aside class="risk-strip">
-      <b>BOUNDARY NOTE</b>
-      独立 context 与进程不等于文件系统沙箱。标记为 SHARED CWD 的 agent 可能看到并覆盖彼此的文件变更。
-    </aside>
-
-    <main class="workspace">
-      <section class="agent-rail" aria-label="Agents">
-        <div class="section-head">
-          <div><span>FLEET</span><small id="agent-count">0 AGENTS</small></div>
-          <input id="filter" type="search" placeholder="FILTER BY NAME / ID" aria-label="Filter agents">
+    <main>
+      <section class="overview" aria-labelledby="overview-title">
+        <div class="overview-main">
+          <span class="overline">LIVE FLEET / 实时状态</span>
+          <h1 id="overview-title"><span id="hero-active">0</span><span class="hero-caption">个 Agent 进程<br>在运行</span></h1>
+          <p>查看每个实例的载体、状态与 Skill 权限。托管会话单独统计。</p>
         </div>
-        <div id="agent-list" class="agent-list"></div>
+        <div class="activity-panel" aria-label="Agent 状态分布">
+          <div class="activity-head"><span>ACTIVITY</span><span id="last-sync">等待同步</span></div>
+          <div id="activity-track" class="activity-track"><span class="activity-empty">暂无实例</span></div>
+          <div class="activity-legend"><span><i class="dot running"></i>执行中</span><span><i class="dot idle"></i>待命</span><span><i class="dot waiting_input"></i>等待输入</span><span><i class="dot failed"></i>异常</span></div>
+        </div>
       </section>
 
-      <section id="detail" class="detail" aria-live="polite">
-        <div id="empty-state" class="empty-state">
-          <span class="empty-glyph">⌁</span>
-          <h1>NO AGENT SELECTED</h1>
-          <p>Choose an agent from the fleet or create a new managed Pi worker.</p>
+      <section class="metric-strip" aria-label="平台概况">
+        <article><span>托管会话</span><strong id="metric-total">0</strong></article>
+        <article><span>执行中</span><strong id="metric-running">0</strong></article>
+        <article><span>等待输入</span><strong id="metric-waiting">0</strong></article>
+        <article><span>异常</span><strong id="metric-faulted">0</strong></article>
+        <article><span>可用载体</span><strong id="metric-carriers">0</strong></article>
+        <article><span>Skill 快照</span><strong id="metric-skills">0</strong></article>
+      </section>
+
+      <section id="agents-view" class="page-view" aria-labelledby="agents-title">
+        <div class="view-heading">
+          <div><span class="overline">MANAGED INSTANCES</span><h2 id="agents-title">Agent 实例</h2></div>
+          <span id="agent-count" class="view-counter">0 个实例</span>
         </div>
-
-        <div id="agent-detail" class="agent-detail hidden">
-          <div class="detail-head">
-            <div>
-              <div class="eyebrow">SELECTED AGENT</div>
-              <h1 id="detail-name">—</h1>
-              <code id="detail-id">—</code>
+        <div class="fleet-layout">
+          <aside class="fleet-panel" aria-label="Agent 列表">
+            <div class="filters">
+              <label class="search-field"><span class="sr-only">按名称或 ID 搜索</span><input id="filter" type="search" placeholder="搜索名称或 ID"></label>
+              <div class="filter-row">
+                <label><span class="sr-only">筛选载体</span><select id="carrier-filter"><option value="">全部载体</option></select></label>
+                <label><span class="sr-only">筛选状态</span><select id="status-filter"><option value="">全部状态</option><option value="running">执行中</option><option value="idle">待命</option><option value="waiting_input">等待输入</option><option value="starting">启动中</option><option value="provisioning">准备中</option><option value="stopping">停止中</option><option value="stopped">已停止</option><option value="crashed">崩溃</option><option value="failed">失败</option></select></label>
+              </div>
             </div>
-            <div class="detail-actions">
-              <button class="button button-quiet" data-action="restart" type="button">RESTART</button>
-              <button class="button button-warn" data-action="abort" type="button">ABORT TURN</button>
-              <button class="button button-danger" data-action="stop" type="button">STOP</button>
-            </div>
-          </div>
+            <div id="agent-list" class="agent-list" aria-live="polite"></div>
+          </aside>
 
-          <div class="spec-grid">
-            <article><span>STATUS</span><strong id="detail-status">—</strong></article>
-            <article><span>MODEL</span><strong id="detail-model">UNSET</strong></article>
-            <article><span>THINKING</span><strong id="detail-thinking">DEFAULT</strong></article>
-            <article><span>PID</span><strong id="detail-pid">—</strong></article>
-            <article class="wide"><span>WORKING DIRECTORY</span><code id="detail-cwd">—</code></article>
-            <article class="wide"><span>SESSION</span><code id="detail-session">—</code></article>
-          </div>
-
-          <section class="event-section">
-            <div class="section-head inline">
-              <div><span>EVENT STREAM</span><small id="event-count">0 EVENTS</small></div>
-              <label class="toggle"><input id="verbose-events" type="checkbox"> RAW PAYLOAD</label>
+          <section id="detail" class="detail-panel" aria-live="polite" aria-label="Agent 详情">
+            <div id="empty-state" class="empty-state">
+              <div class="empty-orbit" aria-hidden="true"><span></span></div>
+              <span class="overline">NO SELECTION</span>
+              <h3>选择一个 Agent</h3>
+              <p>从左侧查看实例详情，或创建新的 subagent。</p>
             </div>
-            <div id="events" class="events"></div>
+
+            <div id="agent-detail" class="agent-detail hidden">
+              <div class="detail-head">
+                <div class="detail-identity">
+                  <span class="overline">INSTANCE DETAIL <span id="detail-carrier-tag" class="carrier-tag">PI</span></span>
+                  <h3 id="detail-name">—</h3>
+                  <code id="detail-id">—</code>
+                </div>
+                <div class="detail-actions">
+                  <button class="button button-secondary" data-action="restart" type="button">重启</button>
+                  <button class="button button-secondary" data-action="abort" type="button">中止当前回合</button>
+                  <button class="button button-danger" data-action="stop" type="button">停止</button>
+                </div>
+              </div>
+
+              <div class="detail-status-line">
+                <span id="detail-status-indicator" class="status-pill"><i class="dot"></i><span id="detail-status">—</span></span>
+                <span>启动于 <time id="detail-created">—</time></span>
+                <span id="detail-updated-wrap">更新于 <time id="detail-updated">—</time></span>
+              </div>
+
+              <div class="spec-grid">
+                <article><span>载体</span><strong id="detail-carrier">—</strong></article>
+                <article><span>模型</span><strong id="detail-model">—</strong></article>
+                <article><span>思考级别</span><strong id="detail-thinking">—</strong></article>
+                <article><span>进程 / 会话</span><code id="detail-process">—</code></article>
+                <article class="wide"><span>工作目录</span><code id="detail-cwd">—</code></article>
+                <article class="wide"><span>Skill 权限</span><strong id="detail-skill-policy">—</strong><div id="detail-skill-list" class="permission-list"></div></article>
+              </div>
+
+              <div id="detail-error" class="error-panel hidden" role="alert"><span>最近错误</span><p></p></div>
+
+              <section class="timeline-section">
+                <div class="subheading"><div><span class="overline">LIFECYCLE</span><h4>状态时间线</h4></div><small id="timeline-count">0 项</small></div>
+                <div id="timeline" class="timeline"></div>
+              </section>
+
+              <section class="events-section">
+                <div class="subheading"><div><span class="overline">EVENT STREAM</span><h4>最近事件</h4></div><label class="toggle"><input id="verbose-events" type="checkbox"> 展开原始数据</label></div>
+                <div id="events" class="events"></div>
+              </section>
+
+              <form id="message-form" class="command-dock">
+                <label for="message">发送指令</label>
+                <textarea id="message" rows="3" placeholder="向当前 Agent 发送消息…" required></textarea>
+                <div class="command-actions">
+                  <label><span class="sr-only">指令类型</span><select id="message-kind"><option value="prompt">消息</option><option value="steer">调整当前任务</option><option value="follow-up">后续任务</option></select></label>
+                  <button class="button button-primary" type="submit">发送 ↗</button>
+                </div>
+              </form>
+            </div>
           </section>
-
-          <form id="message-form" class="command-dock">
-            <label for="message">COMMAND CHANNEL</label>
-            <textarea id="message" rows="3" placeholder="Send a prompt, steering instruction, or follow-up…" required></textarea>
-            <div>
-              <select id="message-kind" aria-label="Message kind">
-                <option value="prompt">PROMPT</option>
-                <option value="steer">STEER</option>
-                <option value="follow-up">FOLLOW-UP</option>
-              </select>
-              <button class="button button-primary" type="submit">TRANSMIT ↗</button>
-            </div>
-          </form>
         </div>
+      </section>
+
+      <section id="skills-view" class="page-view skills-view hidden" aria-labelledby="skills-title">
+        <div class="view-heading">
+          <div><span class="overline">PRIVATE SNAPSHOTS</span><h2 id="skills-title">Skill 广场</h2></div>
+          <span id="skill-count" class="view-counter">0 份快照</span>
+        </div>
+        <p class="view-intro">这里列出已导入平台私有存储的 Skill 快照。创建 Agent 时可授权全部或仅授权指定快照；已运行实例的授权不会因新导入而改变。</p>
+        <div id="skills-list" class="skills-list" aria-live="polite"></div>
+      </section>
+
+      <section id="providers-view" class="page-view providers-view hidden" aria-labelledby="providers-title">
+        <div class="view-heading">
+          <div><span class="overline">PROVIDER ROUTING / CC SWITCH</span><h2 id="providers-title">供应商与模型</h2></div>
+          <button id="new-provider" class="button button-primary" type="button">＋ 新增供应商</button>
+        </div>
+        <p class="view-intro">平台使用应用私有的 CC Switch CLI 分支管理三个载体的 API 地址、协议和模型列表。这里仅显示非敏感信息，API Key 不会回显。</p>
+        <div id="provider-switch-status" class="provider-status" role="status" aria-live="polite">正在读取 CC Switch 状态…</div>
+        <div id="provider-apps" class="provider-apps" aria-live="polite"></div>
       </section>
     </main>
 
-    <dialog id="create-dialog">
+    <dialog id="create-dialog" aria-labelledby="create-title">
       <form id="create-form" method="dialog">
-        <div class="dialog-head">
-          <div><span>PROVISION WORKER</span><h2>NEW PI SUBAGENT</h2></div>
-          <button class="icon-button" value="cancel" aria-label="Close">×</button>
-        </div>
-        <label>DISPLAY NAME<input name="name" required placeholder="reviewer-a"></label>
-        <label>WORKING DIRECTORY<input name="cwd" required placeholder="/absolute/path/to/project"></label>
+        <div class="dialog-head"><div><span class="overline">CREATE INSTANCE</span><h2 id="create-title">创建 Agent</h2></div><button class="close-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button></div>
         <div class="form-row">
-          <label>MODEL<input name="model" placeholder="provider/model-id"></label>
-          <label>THINKING<select name="thinking"><option value="">DEFAULT</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
+          <label>名称<input name="name" required placeholder="例如：reviewer-a" autocomplete="off"></label>
+          <label>载体<select id="create-carrier" name="carrier" required><option value="">加载中…</option></select><small id="create-carrier-note" class="carrier-note"></small></label>
         </div>
-        <label>INITIAL PROMPT<textarea name="prompt" rows="4" placeholder="Optional — start the first turn immediately"></textarea></label>
-        <label class="check"><input name="confirmShared" type="checkbox" required> I understand this initial version uses the supplied directory as a shared workspace and does not provide filesystem sandboxing.</label>
-        <div class="dialog-actions">
-          <button class="button button-quiet" value="cancel">CANCEL</button>
-          <button class="button button-primary" value="default" type="submit">CREATE AGENT</button>
+        <div id="carrier-availability" class="carrier-availability" aria-label="载体可用状态"></div>
+        <label>工作目录<input name="cwd" required placeholder="/absolute/path/to/project" autocomplete="off"></label>
+        <div class="form-row">
+          <label>供应商 <small>按载体读取 CC Switch 配置</small><select id="create-provider" name="provider"><option value="">使用载体已有配置</option></select></label>
+          <label>模型 <small>由所选供应商提供</small><select id="create-model" name="model-choice"><option value="">使用供应商默认模型</option></select></label>
         </div>
+        <div class="form-row">
+          <label>手工模型 ID <small>可选；填写后覆盖上方模型</small><input id="create-model-manual" name="model-manual" placeholder="model-id" autocomplete="off"></label>
+          <label>思考级别<select id="create-thinking" name="thinking"><option value="">使用载体默认值</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select><small id="create-thinking-note"></small></label>
+        </div>
+        <p id="create-provider-note" class="provider-form-note">正在读取供应商配置…</p>
+        <fieldset class="policy-fieldset">
+          <legend>Skill 自动加载范围</legend>
+          <label class="policy-option"><input type="radio" name="skill-mode" value="all" checked><span><strong>全部 Skill</strong><small>授权当前广场中的所有快照。默认选择。</small></span></label>
+          <label class="policy-option"><input type="radio" name="skill-mode" value="only"><span><strong>仅加载指定 Skill</strong><small>未勾选时，平台不为该 Agent 加载 Skill。</small></span></label>
+          <div id="create-skill-selector" class="skill-selector hidden"><div id="create-skill-options"></div></div>
+          <p id="policy-boundary-note" class="policy-boundary-note hidden"></p>
+        </fieldset>
+        <label>初始任务 <small>可留空</small><textarea name="prompt" rows="4" placeholder="创建后立即发送的任务…"></textarea></label>
+        <p class="form-note">Skill 加载清单在创建时固定。这不限制 Agent 读取工作目录、其他文件、凭据或访问网络。</p>
         <p id="create-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>取消</button><button id="create-submit" class="button button-primary" value="create" type="submit">创建 Agent ↗</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="provider-dialog" aria-labelledby="provider-dialog-title">
+      <form id="provider-form">
+        <div class="dialog-head"><div><span class="overline">CC SWITCH / PRIVATE CONFIG</span><h2 id="provider-dialog-title">新增供应商</h2></div><button id="provider-close" class="close-button" aria-label="关闭" type="button">×</button></div>
+        <div class="form-row">
+          <label>载体<select name="app" required><option value="pi">Pi Agent CLI</option><option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option></select></label>
+          <label>供应商 ID<input name="id" required maxlength="64" placeholder="例如：team-api" autocomplete="off" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" title="使用字母、数字、点、下划线或连字符"></label>
+        </div>
+        <label>显示名称<input name="name" required placeholder="例如：团队模型网关" autocomplete="off"></label>
+        <div class="form-row">
+          <label>API URL <small>HTTP(S) 地址，不含查询参数或凭据</small><input name="baseUrl" type="url" required placeholder="https://api.example.com/v1" autocomplete="off"></label>
+          <label>API 协议<select id="provider-api-format" name="apiFormat" required></select></label>
+        </div>
+        <label id="claude-auth-field" class="hidden">Claude 认证方式<select id="claude-auth-mode" name="authMode"></select></label>
+        <label>API Key / Token <small id="provider-key-note">仅用于本次保存请求，页面不会读取或显示已有凭据。</small><input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="输入新的 API Key 或 Token"></label>
+        <label>模型列表 <small>至少一个；一行一个模型 ID，也支持逗号分隔</small><textarea name="modelList" rows="4" required placeholder="model-a&#10;model-b" spellcheck="false"></textarea></label>
+        <label>默认模型 <small>留空时使用列表第一个；Pi 创建 Agent 时仍需指定模型</small><input name="defaultModel" list="provider-model-options" placeholder="model-a" autocomplete="off"><datalist id="provider-model-options"></datalist></label>
+        <p id="provider-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button id="provider-cancel" class="button button-secondary" type="button">取消</button><button id="provider-submit" class="button button-primary" type="submit">保存供应商 ↗</button></div>
       </form>
     </dialog>
 

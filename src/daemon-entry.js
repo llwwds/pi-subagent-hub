@@ -5,9 +5,12 @@ import { AgentManager } from "./manager.js";
 import { APP_VERSION } from "./constants.js";
 import { ensureDefaultProfile, resolveProfile } from "./profile.js";
 import { createHubServer } from "./http-server.js";
-import { assertStateHomeOutsideApp, ensureHubLayout, hasBuiltPi, resolveHubPaths } from "./paths.js";
+import { assertStateHomeOutsideApp, ensureHubLayout, resolveHubPaths } from "./paths.js";
 import { atomicWriteJson, isProcessAlive, newToken, nowIso, readJson } from "./utils.js";
 import { ensurePiConfigFiles } from "./config-files.js";
+import { createDefaultCarrierRegistry } from "./carriers/index.js";
+import { SkillRegistry } from "./skills/registry.js";
+import { CcSwitchService } from "./cc-switch/service.js";
 
 const homeIndex = process.argv.indexOf("--home");
 const home = homeIndex >= 0 ? process.argv[homeIndex + 1] : undefined;
@@ -15,11 +18,6 @@ const paths = resolveHubPaths(home);
 assertStateHomeOutsideApp(paths);
 ensureHubLayout(paths);
 ensurePiConfigFiles(paths);
-
-if (!hasBuiltPi(paths)) {
-  process.stderr.write(`Pi runtime is not built: ${paths.piCliPath}\n`);
-  process.exit(2);
-}
 
 if (existsSync(paths.lockPath)) {
   const stale = readJson(paths.lockPath, {});
@@ -36,7 +34,10 @@ const control = readJson(paths.controlPath) || { token: newToken(), createdAt: n
 atomicWriteJson(paths.controlPath, control);
 const profile = resolveProfile(ensureDefaultProfile(paths.profilePath));
 const store = new HubStore(paths.databasePath);
-const manager = new AgentManager({ paths, store, profile });
+const carrierRegistry = createDefaultCarrierRegistry();
+const skillRegistry = new SkillRegistry({ home: paths.home });
+const ccSwitchService = new CcSwitchService(paths);
+const manager = new AgentManager({ paths, store, profile, carrierRegistry, skillRegistry, ccSwitchService });
 manager.recoverAfterDaemonRestart();
 
 let closing = false;

@@ -9,6 +9,7 @@ function hydrateAgent(row) {
     tools: JSON.parse(row.tools_json || "[]"),
     skills: JSON.parse(row.skills_json || "[]"),
     extensions: JSON.parse(row.extensions_json || "[]"),
+    skill_authorization: JSON.parse(row.skill_authorization_json || "null"),
   };
 }
 
@@ -40,6 +41,8 @@ export class HubStore {
         tools_json TEXT NOT NULL,
         skills_json TEXT NOT NULL,
         extensions_json TEXT NOT NULL,
+        carrier TEXT NOT NULL DEFAULT 'pi',
+        skill_authorization_json TEXT,
         last_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -56,20 +59,30 @@ export class HubStore {
       CREATE INDEX IF NOT EXISTS idx_events_agent_cursor ON events(agent_id, cursor);
       CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
     `);
+    const columns = new Set(this.db.prepare("PRAGMA table_info(agents)").all().map((row) => row.name));
+    if (!columns.has("carrier")) this.db.exec("ALTER TABLE agents ADD COLUMN carrier TEXT NOT NULL DEFAULT 'pi'");
+    if (!columns.has("skill_authorization_json")) this.db.exec("ALTER TABLE agents ADD COLUMN skill_authorization_json TEXT");
   }
 
   createAgent(agent) {
+    const record = {
+      ...agent,
+      carrier: agent.carrier || "pi",
+      skill_authorization_json: agent.skill_authorization_json || null,
+    };
     this.db.prepare(`
       INSERT INTO agents (
         id, name, cwd, workspace_mode, provider, model, thinking, status, desired_state, pid,
         session_id, session_file, session_dir, agent_dir, logs_dir, profile_digest,
-        tools_json, skills_json, extensions_json, last_error, created_at, updated_at
+        tools_json, skills_json, extensions_json, carrier, skill_authorization_json,
+        last_error, created_at, updated_at
       ) VALUES (
         @id, @name, @cwd, @workspace_mode, @provider, @model, @thinking, @status, @desired_state, @pid,
         @session_id, @session_file, @session_dir, @agent_dir, @logs_dir, @profile_digest,
-        @tools_json, @skills_json, @extensions_json, @last_error, @created_at, @updated_at
+        @tools_json, @skills_json, @extensions_json, @carrier, @skill_authorization_json,
+        @last_error, @created_at, @updated_at
       )
-    `).run(agent);
+    `).run(record);
     return this.getAgent(agent.id);
   }
 
@@ -77,10 +90,12 @@ export class HubStore {
     return hydrateAgent(this.db.prepare("SELECT * FROM agents WHERE id = ?").get(id));
   }
 
-  listAgents({ includeStopped = true } = {}) {
-    const rows = includeStopped
-      ? this.db.prepare("SELECT * FROM agents ORDER BY created_at DESC").all()
-      : this.db.prepare("SELECT * FROM agents WHERE status NOT IN ('stopped', 'failed') ORDER BY created_at DESC").all();
+  listAgents({ includeStopped = true, legacyOnly = false } = {}) {
+    const filters = [];
+    if (!includeStopped) filters.push("status NOT IN ('stopped', 'failed')");
+    if (legacyOnly) filters.push("skill_authorization_json IS NULL");
+    const where = filters.length ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM agents${where} ORDER BY created_at DESC`).all();
     return rows.map(hydrateAgent);
   }
 
@@ -108,16 +123,24 @@ export class HubStore {
     return Number(result.lastInsertRowid);
   }
 
-  listEvents({ agentId = null, after = 0, limit = 500 } = {}) {
+  listEvents({ agentId = null, after = 0, limit = 500, legacyOnly = false } = {}) {
     const safeLimit = Math.max(1, Math.min(Number(limit) || 500, 2000));
-    const rows = agentId
-      ? this.db.prepare("SELECT * FROM events WHERE agent_id = ? AND cursor > ? ORDER BY cursor ASC LIMIT ?").all(agentId, Number(after) || 0, safeLimit)
-      : this.db.prepare("SELECT * FROM events WHERE cursor > ? ORDER BY cursor ASC LIMIT ?").all(Number(after) || 0, safeLimit);
+    const cursor = Number(after) || 0;
+    const rows = legacyOnly
+      ? agentId
+        ? this.db.prepare("SELECT e.* FROM events e JOIN agents a ON a.id = e.agent_id WHERE a.skill_authorization_json IS NULL AND e.agent_id = ? AND e.cursor > ? ORDER BY e.cursor ASC LIMIT ?").all(agentId, cursor, safeLimit)
+        : this.db.prepare("SELECT e.* FROM events e JOIN agents a ON a.id = e.agent_id WHERE a.skill_authorization_json IS NULL AND e.cursor > ? ORDER BY e.cursor ASC LIMIT ?").all(cursor, safeLimit)
+      : agentId
+        ? this.db.prepare("SELECT * FROM events WHERE agent_id = ? AND cursor > ? ORDER BY cursor ASC LIMIT ?").all(agentId, cursor, safeLimit)
+        : this.db.prepare("SELECT * FROM events WHERE cursor > ? ORDER BY cursor ASC LIMIT ?").all(cursor, safeLimit);
     return rows.map((row) => ({ ...row, payload: JSON.parse(row.payload_json) }));
   }
 
-  latestCursor() {
-    return Number(this.db.prepare("SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events").get().cursor);
+  latestCursor({ legacyOnly = false } = {}) {
+    const sql = legacyOnly
+      ? "SELECT COALESCE(MAX(e.cursor), 0) AS cursor FROM events e JOIN agents a ON a.id = e.agent_id WHERE a.skill_authorization_json IS NULL"
+      : "SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events";
+    return Number(this.db.prepare(sql).get().cursor);
   }
 
   markInterruptedAgents() {

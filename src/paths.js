@@ -33,6 +33,12 @@ export function resolveHubPaths(home = process.env.PIHUB_HOME || getDefaultHome(
     daemonStdoutPath: join(resolvedHome, "state", "daemon.stdout.log"),
     daemonStderrPath: join(resolvedHome, "state", "daemon.stderr.log"),
     agentsDir: join(resolvedHome, "agents"),
+    codexCliPath: join(resolvedHome, "toolchains", "codex", "node_modules", ".bin", "codex"),
+    claudeCliPath: join(resolvedHome, "toolchains", "claude", "node_modules", ".bin", "claude"),
+    ccSwitchCliPath: join(resolvedHome, "toolchains", "cc-switch-cli", "cc-switch"),
+    ccSwitchConfigDir: join(resolvedHome, "cc-switch", "data"),
+    ccSwitchHome: join(resolvedHome, "cc-switch", "home"),
+    ccSwitchPiDir: join(resolvedHome, "cc-switch", "pi-agent"),
     piLockPath: join(resolve(appRoot), "vendor", "pi.lock.json"),
     piCliPath: process.env.PIHUB_PI_CLI || join(resolve(appRoot), "vendor", "pi-runtime", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "bundle", "cli.js"),
   };

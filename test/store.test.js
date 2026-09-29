@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { HubStore } from "../src/store.js";
 
 test("store keeps one row per agent and ordered event cursors", () => {
@@ -23,4 +24,31 @@ test("store keeps one row per agent and ordered event cursors", () => {
   assert.deepEqual(store.listEvents({ agentId: "agent-one", after: 1 }).map((item) => item.payload.n), [2]);
   store.close();
   rmSync(root, { recursive: true, force: true });
+});
+
+test("store migrates existing agents to Pi without changing their stored Skill policy", () => {
+  const root = mkdtempSync(join(tmpdir(), "pihub-store-migrate-"));
+  const path = join(root, "hub.sqlite");
+  const old = new DatabaseSync(path);
+  old.exec(`
+    CREATE TABLE agents (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      tools_json TEXT NOT NULL,
+      skills_json TEXT NOT NULL,
+      extensions_json TEXT NOT NULL
+    );
+    INSERT INTO agents VALUES ('legacy-agent', 'idle', '["read"]', '[]', '[]');
+  `);
+  old.close();
+  const store = new HubStore(path);
+  try {
+    const agent = store.getAgent("legacy-agent");
+    assert.equal(agent.carrier, "pi");
+    assert.equal(agent.skill_authorization, null);
+    assert.deepEqual(agent.tools, ["read"]);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

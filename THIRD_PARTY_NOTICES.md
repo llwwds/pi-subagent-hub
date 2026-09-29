@@ -34,3 +34,23 @@ The Pi Agent MIT license text is reproduced below:
 The full transitive dependency license set is represented by the locked npm
 dependency graph. The v1.0 GitHub release publishes source archives only; it
 does not publish a prebuilt dependency bundle.
+
+## CC Switch (v2 development)
+
+The v2 development environment keeps an independent copy of the official
+[CC Switch](https://github.com/farion1231/cc-switch) desktop application
+(`v3.20.4`) and uses the independent
+[CC-Switch CLI fork](https://github.com/SaladDay/cc-switch-cli) (`v5.10.5`)
+for private, noninteractive provider management. Neither binary is committed to
+this source repository. The desktop copy is not started by the Hub because its
+stock single-instance identity can reach an existing user installation.
+
+- License: MIT for both projects.
+- Copyright: Copyright (c) 2025 Jason Young; CLI fork contributions Copyright
+  (c) 2025 saladday.
+- The full license text is retained with each app-local installation and is
+  available at each project's linked `LICENSE` file.
+
+Codex CLI and Claude Code CLI are also installed only in the app-local
+development toolchains. Their own distribution terms apply; they are not
+included in this repository's source release.

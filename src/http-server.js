@@ -2,7 +2,7 @@ import { createReadStream, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join } from "node:path";
 import { APP_VERSION, API_VERSION } from "./constants.js";
-import { publicAgent } from "./utils.js";
+import { publicAgent, publicAgentV2 } from "./utils.js";
 
 const MIME = {
   ".css": "text/css; charset=utf-8",
@@ -80,16 +80,74 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
     if (authorization !== `Bearer ${token}`) return fail(response, 401, "unauthorized", "valid local control token required");
 
     try {
+      if (request.method === "GET" && pathname === "/v2/snapshot") {
+        return ok(response, {
+          version: APP_VERSION,
+          profile: { name: manager.profile.name, digest: manager.profile.digest, tools: manager.profile.tools },
+          agents: manager.listAgents().map(publicAgentV2),
+          activeCount: manager.activeCount(),
+          managedCount: manager.managedCount(),
+          eventCursor: store.latestCursor(),
+        });
+      }
+      if (request.method === "GET" && pathname === "/v2/events") {
+        return ok(response, manager.listEvents({ after: url.searchParams.get("after"), limit: url.searchParams.get("limit") }));
+      }
+      if (request.method === "GET" && pathname === "/v2/carriers") {
+        return ok(response, await manager.listCarriers());
+      }
+      if (request.method === "GET" && pathname === "/v2/providers") {
+        return ok(response, await manager.listProviders());
+      }
+      if (request.method === "POST" && pathname === "/v2/providers") {
+        return ok(response, await manager.addProvider(await readBody(request)), 201);
+      }
+      const providerSwitchMatch = pathname.match(/^\/v2\/providers\/([^/]+)\/([^/]+)\/switch$/);
+      if (request.method === "POST" && providerSwitchMatch) {
+        return ok(response, await manager.switchProvider(
+          decodeURIComponent(providerSwitchMatch[1]), decodeURIComponent(providerSwitchMatch[2]),
+        ));
+      }
+      if (request.method === "GET" && pathname === "/v2/skills") {
+        return ok(response, manager.listSkills());
+      }
+      if (request.method === "POST" && pathname === "/v2/skills/import") {
+        const body = await readBody(request);
+        return ok(response, await manager.importSkill(body), 201);
+      }
+      if (request.method === "POST" && pathname === "/v2/agents") {
+        const body = await readBody(request);
+        return ok(response, publicAgentV2(await manager.createPlatformAgent(body)), 201);
+      }
+      const platformAgentMatch = pathname.match(/^\/v2\/agents\/([^/]+)(?:\/(.*))?$/);
+      if (platformAgentMatch) {
+        const id = decodeURIComponent(platformAgentMatch[1]);
+        const action = platformAgentMatch[2] || "";
+        const agent = manager.getAgent(id);
+        if (!agent) return fail(response, 404, "agent_not_found", `unknown agent: ${id}`);
+        if (request.method === "GET" && action === "") return ok(response, publicAgentV2(agent));
+        if (request.method === "GET" && action === "events") {
+          return ok(response, manager.listEvents({ agentId: id, after: url.searchParams.get("after"), limit: url.searchParams.get("limit") }));
+        }
+        if (request.method === "POST" && new Set(["prompt", "steer", "follow-up"]).has(action)) {
+          const body = await readBody(request);
+          const kind = action === "follow-up" ? "follow_up" : action;
+          return ok(response, await manager.send(id, kind, body.message));
+        }
+        if (request.method === "POST" && action === "abort") return ok(response, await manager.request(id, "abort"));
+        if (request.method === "POST" && action === "stop") return ok(response, publicAgentV2(await manager.stopAgent(id)));
+        if (request.method === "POST" && action === "restart") return ok(response, publicAgentV2(await manager.restartAgent(id)));
+      }
       if (request.method === "GET" && pathname === "/v1/snapshot") {
         return ok(response, {
           version: APP_VERSION,
           profile: { name: manager.profile.name, digest: manager.profile.digest, tools: manager.profile.tools },
-          agents: manager.listAgents().map(publicAgent),
-          eventCursor: store.latestCursor(),
+          agents: manager.listAgents({ legacyOnly: true }).map(publicAgent),
+          eventCursor: store.latestCursor({ legacyOnly: true }),
         });
       }
       if (request.method === "GET" && pathname === "/v1/agents") {
-        return ok(response, manager.listAgents({ includeStopped: url.searchParams.get("all") !== "false" }).map(publicAgent));
+        return ok(response, manager.listAgents({ includeStopped: url.searchParams.get("all") !== "false", legacyOnly: true }).map(publicAgent));
       }
       if (request.method === "POST" && pathname === "/v1/agents") {
         const body = await readBody(request);
@@ -97,7 +155,7 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
         return ok(response, publicAgent(created), 201);
       }
       if (request.method === "GET" && pathname === "/v1/events") {
-        return ok(response, manager.listEvents({ after: url.searchParams.get("after"), limit: url.searchParams.get("limit") }));
+        return ok(response, manager.listEvents({ after: url.searchParams.get("after"), limit: url.searchParams.get("limit"), legacyOnly: true }));
       }
 
       const agentMatch = pathname.match(/^\/v1\/agents\/([^/]+)(?:\/(.*))?$/);
@@ -105,7 +163,7 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
         const id = decodeURIComponent(agentMatch[1]);
         const action = agentMatch[2] || "";
         const agent = manager.getAgent(id);
-        if (!agent) return fail(response, 404, "agent_not_found", `unknown agent: ${id}`);
+        if (!agent || agent.skill_authorization) return fail(response, 404, "agent_not_found", `unknown agent: ${id}`);
         if (request.method === "GET" && action === "") return ok(response, publicAgent(agent));
         if (request.method === "GET" && action === "events") {
           return ok(response, manager.listEvents({ agentId: id, after: url.searchParams.get("after"), limit: url.searchParams.get("limit") }));
