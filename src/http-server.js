@@ -54,6 +54,13 @@ function serveFile(response, path, extraHeaders = {}) {
 
 export function createHubServer({ manager, store, paths, token, onStop }) {
   const dashboardDir = join(paths.appRoot, "src", "dashboard");
+  // Frozen prompt configuration is exposed through this normalized view instead
+  // of the raw store column; full text is only returned per Agent.
+  // `publicAgent()` already excludes the raw frozen column.
+  const legacyView = (agent) => publicAgent(agent);
+  const agentView = (agent, options) => (agent
+    ? { ...publicAgentV2(agent), promptConfig: manager.promptConfigOf(agent, options) }
+    : null);
   return createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const pathname = url.pathname;
@@ -84,7 +91,7 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
         return ok(response, {
           version: APP_VERSION,
           profile: { name: manager.profile.name, digest: manager.profile.digest, tools: manager.profile.tools },
-          agents: manager.listAgents().map(publicAgentV2),
+          agents: manager.listAgents().map((agent) => agentView(agent, { includeText: false })),
           activeCount: manager.activeCount(),
           managedCount: manager.managedCount(),
           eventCursor: store.latestCursor(),
@@ -108,8 +115,22 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
           decodeURIComponent(providerSwitchMatch[1]), decodeURIComponent(providerSwitchMatch[2]),
         ));
       }
+      if (request.method === "GET" && pathname === "/v2/prompts") {
+        return ok(response, manager.getPromptCatalog());
+      }
       if (request.method === "GET" && pathname === "/v2/skills") {
         return ok(response, manager.listSkills());
+      }
+      if (request.method === "GET" && pathname === "/v2/skills/manager") {
+        return ok(response, await manager.skillManagerStatus({ live: url.searchParams.get("live") === "true" }));
+      }
+      const skillManagerMatch = pathname.match(/^\/v2\/skills\/manager\/(connect|sync|disconnect)$/);
+      if (request.method === "POST" && skillManagerMatch) {
+        const body = await readBody(request);
+        const action = skillManagerMatch[1];
+        if (action === "connect") return ok(response, await manager.connectSkillManager(body));
+        if (action === "sync") return ok(response, await manager.syncSkillManager(body));
+        return ok(response, await manager.disconnectSkillManager(body));
       }
       if (request.method === "POST" && pathname === "/v2/skills/import") {
         const body = await readBody(request);
@@ -117,7 +138,7 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
       }
       if (request.method === "POST" && pathname === "/v2/agents") {
         const body = await readBody(request);
-        return ok(response, publicAgentV2(await manager.createPlatformAgent(body)), 201);
+        return ok(response, agentView(await manager.createPlatformAgent(body), { includeText: true }), 201);
       }
       const platformAgentMatch = pathname.match(/^\/v2\/agents\/([^/]+)(?:\/(.*))?$/);
       if (platformAgentMatch) {
@@ -125,7 +146,8 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
         const action = platformAgentMatch[2] || "";
         const agent = manager.getAgent(id);
         if (!agent) return fail(response, 404, "agent_not_found", `unknown agent: ${id}`);
-        if (request.method === "GET" && action === "") return ok(response, publicAgentV2(agent));
+        // v2 detail is the only place the frozen prompt text is returned; /v1 keeps its legacy shape.
+        if (request.method === "GET" && action === "") return ok(response, agentView(agent, { includeText: true }));
         if (request.method === "GET" && action === "events") {
           return ok(response, manager.listEvents({ agentId: id, after: url.searchParams.get("after"), limit: url.searchParams.get("limit") }));
         }
@@ -135,24 +157,24 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
           return ok(response, await manager.send(id, kind, body.message));
         }
         if (request.method === "POST" && action === "abort") return ok(response, await manager.request(id, "abort"));
-        if (request.method === "POST" && action === "stop") return ok(response, publicAgentV2(await manager.stopAgent(id)));
-        if (request.method === "POST" && action === "restart") return ok(response, publicAgentV2(await manager.restartAgent(id)));
+        if (request.method === "POST" && action === "stop") return ok(response, legacyView(await manager.stopAgent(id)));
+        if (request.method === "POST" && action === "restart") return ok(response, legacyView(await manager.restartAgent(id)));
       }
       if (request.method === "GET" && pathname === "/v1/snapshot") {
         return ok(response, {
           version: APP_VERSION,
           profile: { name: manager.profile.name, digest: manager.profile.digest, tools: manager.profile.tools },
-          agents: manager.listAgents({ legacyOnly: true }).map(publicAgent),
+          agents: manager.listAgents({ legacyOnly: true }).map(legacyView),
           eventCursor: store.latestCursor({ legacyOnly: true }),
         });
       }
       if (request.method === "GET" && pathname === "/v1/agents") {
-        return ok(response, manager.listAgents({ includeStopped: url.searchParams.get("all") !== "false", legacyOnly: true }).map(publicAgent));
+        return ok(response, manager.listAgents({ includeStopped: url.searchParams.get("all") !== "false", legacyOnly: true }).map(legacyView));
       }
       if (request.method === "POST" && pathname === "/v1/agents") {
         const body = await readBody(request);
         const created = await manager.createAgent(body);
-        return ok(response, publicAgent(created), 201);
+        return ok(response, legacyView(created), 201);
       }
       if (request.method === "GET" && pathname === "/v1/events") {
         return ok(response, manager.listEvents({ after: url.searchParams.get("after"), limit: url.searchParams.get("limit"), legacyOnly: true }));
@@ -164,7 +186,7 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
         const action = agentMatch[2] || "";
         const agent = manager.getAgent(id);
         if (!agent || agent.skill_authorization) return fail(response, 404, "agent_not_found", `unknown agent: ${id}`);
-        if (request.method === "GET" && action === "") return ok(response, publicAgent(agent));
+        if (request.method === "GET" && action === "") return ok(response, legacyView(agent));
         if (request.method === "GET" && action === "events") {
           return ok(response, manager.listEvents({ agentId: id, after: url.searchParams.get("after"), limit: url.searchParams.get("limit") }));
         }
@@ -174,8 +196,8 @@ export function createHubServer({ manager, store, paths, token, onStop }) {
           return ok(response, await manager.send(id, kind, body.message));
         }
         if (request.method === "POST" && action === "abort") return ok(response, await manager.request(id, "abort"));
-        if (request.method === "POST" && action === "stop") return ok(response, publicAgent(await manager.stopAgent(id)));
-        if (request.method === "POST" && action === "restart") return ok(response, publicAgent(await manager.restartAgent(id)));
+        if (request.method === "POST" && action === "stop") return ok(response, legacyView(await manager.stopAgent(id)));
+        if (request.method === "POST" && action === "restart") return ok(response, legacyView(await manager.restartAgent(id)));
       }
 
       if (request.method === "POST" && pathname === "/v1/daemon/stop") {

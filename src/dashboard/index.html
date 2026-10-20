@@ -101,6 +101,7 @@
                 <article><span>进程 / 会话</span><code id="detail-process">—</code></article>
                 <article class="wide"><span>工作目录</span><code id="detail-cwd">—</code></article>
                 <article class="wide"><span>Skill 权限</span><strong id="detail-skill-policy">—</strong><div id="detail-skill-list" class="permission-list"></div></article>
+                <article class="wide"><span>System Prompt 追加</span><strong id="detail-prompt-summary">—</strong><div id="detail-prompt-list" class="permission-list"></div><details id="detail-prompt-details" class="prompt-details"><summary>查看追加正文</summary><pre id="detail-prompt-text">—</pre></details></article>
               </div>
 
               <div id="detail-error" class="error-panel hidden" role="alert"><span>最近错误</span><p></p></div>
@@ -134,6 +135,7 @@
           <span id="skill-count" class="view-counter">0 份快照</span>
         </div>
         <p class="view-intro">这里列出已导入平台私有存储的 Skill 快照。创建 Agent 时可授权全部或仅授权指定快照；已运行实例的授权不会因新导入而改变。</p>
+        <div id="skill-manager" class="skill-manager" aria-live="polite"></div>
         <div id="skills-list" class="skills-list" aria-live="polite"></div>
       </section>
 
@@ -172,6 +174,13 @@
           <label class="policy-option"><input type="radio" name="skill-mode" value="only"><span><strong>仅加载指定 Skill</strong><small>未勾选时，平台不为该 Agent 加载 Skill。</small></span></label>
           <div id="create-skill-selector" class="skill-selector hidden"><div id="create-skill-options"></div></div>
           <p id="policy-boundary-note" class="policy-boundary-note hidden"></p>
+        </fieldset>
+        <fieldset class="policy-fieldset" id="prompt-fieldset">
+          <legend>System Prompt 追加</legend>
+          <p class="form-note">只追加在载体原有系统约束之后，不替换载体自带的系统提示。四项编码原则默认勾选；可全部取消、组合，或补充自定义正文。</p>
+          <div id="create-principles" class="prompt-principles"></div>
+          <label>自定义追加正文 <small>可选，可多行；不会被 shell 执行</small><textarea name="system-prompt" rows="3" placeholder="对该 Agent 的额外要求…"></textarea></label>
+          <p id="prompt-support-note" class="policy-boundary-note hidden"></p>
         </fieldset>
         <label>初始任务 <small>可留空</small><textarea name="prompt" rows="4" placeholder="创建后立即发送的任务…"></textarea></label>
         <p class="form-note">Skill 加载清单在创建时固定。这不限制 Agent 读取工作目录、其他文件、凭据或访问网络。</p>

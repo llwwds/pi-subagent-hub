@@ -12,6 +12,9 @@ export class CodexExecCarrierAdapter {
     events: true,
     skillLoadingSelection: true,
     skillIsolation: false,
+    // Extra developer-layer instructions via -c developer_instructions; the
+    // base developer parts stay untouched (verified with debug prompt-input).
+    systemPrompt: "developer",
   });
 
   diagnose({ paths, env = process.env } = {}) {
@@ -24,7 +27,7 @@ export class CodexExecCarrierAdapter {
     return { available: true };
   }
 
-  createRuntime({ paths, spec, env = process.env } = {}) {
+  createRuntime({ paths, spec, env = process.env, logger = null } = {}) {
     return new CliExecRuntime({
       carrier: this.id,
       executable: paths?.codexCliPath || this.executable,
@@ -42,6 +45,7 @@ export class CodexExecCarrierAdapter {
         } : spec?.ccSwitch || null,
       },
       env,
+      logger,
     });
   }
 }

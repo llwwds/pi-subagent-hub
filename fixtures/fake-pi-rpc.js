@@ -20,6 +20,7 @@ function handle(command) {
     emit({ id: command.id, type: "response", command: command.type, success: true });
     emit({ type: "agent_start" });
     emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: `fake ${command.message}` } });
+    emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `fake ${command.message}` }] } });
     setTimeout(() => emit({ type: "agent_settled" }), 10);
     return;
   }

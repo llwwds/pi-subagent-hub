@@ -12,6 +12,7 @@ export class ClaudeCodeCarrierAdapter {
     events: true,
     skillLoadingSelection: true,
     skillIsolation: false,
+    systemPrompt: "append",
   });
 
   diagnose({ paths, env = process.env } = {}) {
@@ -24,7 +25,7 @@ export class ClaudeCodeCarrierAdapter {
     return { available: true };
   }
 
-  createRuntime({ paths, spec, env = process.env } = {}) {
+  createRuntime({ paths, spec, env = process.env, logger = null } = {}) {
     return new CliExecRuntime({
       carrier: this.id,
       executable: paths?.claudeCliPath || this.executable,
@@ -42,6 +43,7 @@ export class ClaudeCodeCarrierAdapter {
         } : spec?.ccSwitch || null,
       },
       env,
+      logger,
     });
   }
 }

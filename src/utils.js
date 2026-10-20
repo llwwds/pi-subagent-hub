@@ -81,6 +81,8 @@ export function parseModel(value) {
 
 export function publicAgent(agent) {
   if (!agent) return null;
+  // Frozen prompt text stays private here: /v2 exposes a normalized, explicit
+  // `promptConfig` summary instead, and /v1 keeps its original shape.
   const {
     agent_dir: _agentDir,
     logs_dir: _logsDir,
@@ -90,6 +92,8 @@ export function publicAgent(agent) {
     carrier: _carrier,
     skill_authorization_json: _skillAuthorizationJson,
     skill_authorization: _skillAuthorization,
+    prompt_config_json: _promptConfigJson,
+    prompt_config: _promptConfig,
     ...safe
   } = agent;
   return safe;

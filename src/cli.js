@@ -34,7 +34,9 @@ Usage:
   pihub providers add --stdin [--json]  # JSON with app, URL, models and API key
   pihub providers switch --app pi|codex|claude --id ID [--json]
   pihub skills list|import --id ID --source DIR [--label NAME] [--json]
-  pihub agents create --carrier pi|codex|claude --name NAME --cwd DIR [--skills all|none|ID,ID] [--json]
+  pihub skills manager status|connect|sync|disconnect [--cli-path FILE] [--preset ID,ID] [--ids ID,ID] [--tags TAG,TAG] [--json]
+  pihub prompts list [--json]
+  pihub agents create --carrier pi|codex|claude --name NAME --cwd DIR [--skills all|none|ID,ID] [--principles all|none|ID,ID] [--system-prompt TEXT|--system-prompt-file FILE|--system-prompt-stdin] [--json]
   pihub agents create --manifest FILE|- [--json]
   pihub agents list|inspect AGENT_ID [--json]
   pihub agents prompt AGENT_ID [TEXT|--stdin] [--json]
@@ -45,6 +47,9 @@ Usage:
 Machine interface:
   --json keeps stdout as one stable JSON envelope. Diagnostics go to stderr.
   Long prompts should use --stdin to avoid shell quoting and command-history exposure.
+  System prompt text is never executed: it is passed as one argv element or read from
+  a file/stdin. Long multi-line text should use --system-prompt-file or
+  --system-prompt-stdin for the same reason.
 `;
 }
 
@@ -58,7 +63,7 @@ function parseArgs(args) {
       continue;
     }
     const key = value.slice(2);
-    if (new Set(["json", "stdin", "no-open", "all"]).has(key)) options[key] = true;
+    if (new Set(["json", "stdin", "no-open", "all", "live", "force", "purge-snapshot", "system-prompt-stdin"]).has(key)) options[key] = true;
     else {
       if (index + 1 >= args.length) throw new Error(`missing value for ${value}`);
       options[key] = args[index + 1];
@@ -140,12 +145,50 @@ function normalizeSkillPolicy(value) {
   return { mode: "only", ids: value === "none" ? [] : value.split(",").map((id) => id.trim()) };
 }
 
+function readSystemPromptText(options) {
+  const sources = [
+    ["--system-prompt", options["system-prompt"]],
+    ["--system-prompt-file", options["system-prompt-file"]],
+    ["--system-prompt-stdin", options["system-prompt-stdin"]],
+  ].filter(([, value]) => value !== undefined && value !== false);
+  if (sources.length > 1) throw new Error("use only one of --system-prompt, --system-prompt-file, or --system-prompt-stdin");
+  if (sources.length === 0) return undefined;
+  const [flag, value] = sources[0];
+  if (flag === "--system-prompt") return String(value);
+  if (flag === "--system-prompt-stdin") {
+    if (process.stdin.isTTY) throw new Error("--system-prompt-stdin requires piped input");
+    return readStdin();
+  }
+  return readFileSync(value, "utf8");
+}
+
+function normalizePromptConfig(options) {
+  const customText = readSystemPromptText(options);
+  const principles = options.principles;
+  if (customText === undefined && principles === undefined) return undefined;
+  const config = {};
+  if (principles !== undefined && principles !== "all") {
+    config.principleIds = principles === "none" ? [] : String(principles).split(",").map((id) => id.trim()).filter(Boolean);
+  }
+  if (customText !== undefined) config.customText = customText;
+  return config;
+}
+
 function normalizePlatformSpec(options) {
   return {
     ...normalizeCreateSpec(options),
     carrier: options.carrier || "pi",
     skillPolicy: normalizeSkillPolicy(options.skills),
+    promptConfig: normalizePromptConfig(options),
   };
+}
+
+function manifestPromptConfig(manifest, item) {
+  const base = manifest.promptConfig && typeof manifest.promptConfig === "object" ? manifest.promptConfig : {};
+  if (item.promptConfig && typeof item.promptConfig === "object") return { ...base, ...item.promptConfig };
+  if (item.systemPrompt !== undefined) return { ...base, customText: item.systemPrompt };
+  if (item.principles !== undefined) return { ...base, principleIds: item.principles };
+  return Object.keys(base).length > 0 ? base : undefined;
 }
 
 async function createPlatformFromManifest(client, path) {
@@ -169,6 +212,7 @@ async function createPlatformFromManifest(client, path) {
         prompt: item.prompt,
         carrier: item.carrier || "pi",
         skillPolicy: item.skillPolicy || { mode: "all" },
+        promptConfig: manifestPromptConfig(manifest, item),
       });
       results.push({ ok: true, agentId: created.id, agent: created });
     } catch (error) {
@@ -197,6 +241,7 @@ async function createFromManifest(client, path) {
         model: model?.id || model?.model || null,
         thinking: model?.thinking || item.thinking,
         prompt: item.prompt,
+        promptConfig: item.promptConfig,
       });
       results.push({ ok: true, agentId: created.id, agent: created });
     } catch (error) {
@@ -263,7 +308,7 @@ export async function main(argv) {
 
   const command = argv[0];
   const subcommand = argv[1];
-  const parsed = parseArgs(argv.slice(new Set(["daemon", "config", "carriers", "providers", "skills", "agents"]).has(command) ? 2 : 1));
+  const parsed = parseArgs(argv.slice(new Set(["daemon", "config", "carriers", "providers", "skills", "agents", "prompts"]).has(command) ? 2 : 1));
   const paths = resolveHubPaths(process.env.PIHUB_HOME);
   const jsonMode = Boolean(parsed.options.json);
 
@@ -310,6 +355,26 @@ export async function main(argv) {
   }
   if (command === "skills" && subcommand === "list") {
     return output(await client.request("GET", "/v2/skills"), jsonMode);
+  }
+  if (command === "skills" && subcommand === "manager") {
+    const action = parsed.positional[0] || "status";
+    if (action === "status") return output(await client.request("GET", `/v2/skills/manager?live=${parsed.options.live ? "true" : "false"}`), jsonMode);
+    if (!new Set(["connect", "sync", "disconnect"]).has(action)) throw new Error("skills manager requires status, connect, sync, or disconnect");
+    const body = {};
+    for (const [flag, key] of [["cli-path", "cliPath"], ["manager-base-dir", "managerBaseDir"],
+      ["manager-skills-dir", "managerSkillsDir"], ["agent-key", "agentKey"]]) {
+      if (parsed.options[flag] !== undefined) body[key] = parsed.options[flag];
+    }
+    if (parsed.options.source !== undefined) body.source = parsed.options.source;
+    if (parsed.options.preset) body.selection = { ...(body.selection || {}), presetIds: String(parsed.options.preset).split(",").map((id) => id.trim()).filter(Boolean) };
+    if (parsed.options.ids) body.selection = { ...(body.selection || {}), ids: String(parsed.options.ids).split(",").map((id) => id.trim()).filter(Boolean) };
+    if (parsed.options.tags) body.selection = { ...(body.selection || {}), tags: String(parsed.options.tags).split(",").map((id) => id.trim()).filter(Boolean) };
+    if (action === "sync" && parsed.options.force) body.force = true;
+    if (action === "disconnect" && parsed.options["purge-snapshot"]) body.purgeSnapshot = true;
+    return output(await client.request("POST", `/v2/skills/manager/${action}`, body), jsonMode);
+  }
+  if (command === "prompts" && subcommand === "list") {
+    return output(await client.request("GET", "/v2/prompts"), jsonMode);
   }
   if (command === "skills" && subcommand === "import") {
     if (!parsed.options.id || !parsed.options.source) throw new Error("skills import requires --id and --source");

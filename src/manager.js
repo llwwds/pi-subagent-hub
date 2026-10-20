@@ -3,16 +3,36 @@ import { existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { PiRpcProcess } from "./rpc-process.js";
 import { ensurePiConfigFiles } from "./config-files.js";
+import { createHubLogWriter, isEphemeralStreamEvent, resolveHubLogDir } from "./logging.js";
+import { DEFAULT_PROMPT_PRINCIPLE_IDS, listPromptPrinciples, promptSummary, readFrozenPromptConfig, resolvePromptConfig } from "./prompts.js";
 import {
   assertAgentId,
   atomicWriteJson,
   ensurePrivateDir,
   newId,
   nowIso,
+  readJson,
   resolveExistingDirectory,
 } from "./utils.js";
 
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+function promptInput(spec) {
+  if (spec.promptConfig !== undefined && spec.promptConfig !== null) return spec.promptConfig;
+  if (spec.systemPrompt !== undefined || spec.principles !== undefined) {
+    return { customText: spec.systemPrompt, principleIds: spec.principles };
+  }
+  return undefined;
+}
+
+function storeHasColumn(store, column) {
+  try {
+    const rows = store.db?.prepare?.("PRAGMA table_info(agents)")?.all?.() || [];
+    return rows.some((row) => row.name === column);
+  } catch {
+    return false;
+  }
+}
 
 function linkSharedFile(source, target) {
   if (!existsSync(source) || existsSync(target)) return;
@@ -36,6 +56,9 @@ export class AgentManager extends EventEmitter {
     carrierRegistry = null,
     skillRegistry = null,
     ccSwitchService = null,
+    skillManager = null,
+    logger = null,
+    logDebug = undefined,
   }) {
     super();
     this.paths = paths;
@@ -45,7 +68,19 @@ export class AgentManager extends EventEmitter {
     this.carrierRegistry = carrierRegistry;
     this.skillRegistry = skillRegistry;
     this.ccSwitchService = ccSwitchService;
+    this.skillManager = skillManager;
+    this.skillManagerModulePromise = null;
+    // One writer per Hub home; every Agent adapter is only a tagged view of it.
+    // It is opened on first use and closed again when no Agent adapter remains,
+    // so an idle Hub (and every test process) leaves no file handle open.
+    this.injectedLogger = logger;
+    this.logger = logger;
+    this.logDebug = logDebug === undefined ? process.env.PIHUB_LOG_DEBUG === "1" : Boolean(logDebug);
+    this.agentLogs = new Map();
     this.runtimes = new Map();
+    // The store column is the queryable projection; the per-Agent private file
+    // keeps the frozen prompt stable until the column lands in every store.
+    this.promptConfigColumn = storeHasColumn(store, "prompt_config_json");
   }
 
   recoverAfterDaemonRestart() {
@@ -92,6 +127,26 @@ export class AgentManager extends EventEmitter {
     return paths;
   }
 
+  #freezePrompt(stateDir, frozen) {
+    atomicWriteJson(join(stateDir, "prompt-config.json"), frozen);
+  }
+
+  #frozenPrompt(agent) {
+    if (!agent) return null;
+    const stored = readFrozenPromptConfig(agent.prompt_config ?? agent.prompt_config_json);
+    if (stored) return stored;
+    const { stateDir } = this.#agentPaths(agent.id, agent.carrier || "pi");
+    return readFrozenPromptConfig(readJson(join(stateDir, "prompt-config.json")));
+  }
+
+  getPromptCatalog() {
+    return { principles: listPromptPrinciples(), defaultPrincipleIds: [...DEFAULT_PROMPT_PRINCIPLE_IDS] };
+  }
+
+  promptConfigOf(agent, { includeText = false } = {}) {
+    return promptSummary(this.#frozenPrompt(agent), { includeText });
+  }
+
   #record(agentId, eventType, payload) {
     const event = {
       eventId: newId(),
@@ -105,19 +160,28 @@ export class AgentManager extends EventEmitter {
     return cursor;
   }
 
+  #agentLog(agentId) {
+    return this.agentLogs.get(agentId) || null;
+  }
+
   #wireRuntime(agentId, runtime) {
+    const log = this.#agentLog(agentId);
     runtime.on("event", (event) => {
       if (event?.type === "agent_start") this.store.updateAgent(agentId, { status: "running", pid: runtime.pid });
       if (event?.type === "agent_settled") this.store.updateAgent(agentId, { status: "idle", pid: runtime.pid });
       if (event?.type === "extension_ui_request") this.store.updateAgent(agentId, { status: "waiting_input" });
+      // Streaming deltas are progress, not history: neither SQLite nor the Hub log.
+      if (isEphemeralStreamEvent(event)) return;
       this.#record(agentId, event?.type || "pi_event", event);
     });
     runtime.on("protocol_error", ({ error, line }) => {
       this.store.updateAgent(agentId, { last_error: `protocol error: ${error.message}` });
+      log?.note("protocol_error", { message: error.message, line: typeof line === "string" ? line.slice(0, 512) : line }, "error");
       this.#record(agentId, "protocol_error", { message: error.message, line });
     });
     runtime.on("process_error", (error) => {
       this.store.updateAgent(agentId, { status: "crashed", last_error: error.message, pid: null });
+      log?.note("process_error", { message: error.message }, "error");
       this.#record(agentId, "process_error", { message: error.message });
     });
     runtime.on("exit", ({ code, signal, at }) => {
@@ -129,8 +193,41 @@ export class AgentManager extends EventEmitter {
         last_error: expected ? null : `${current?.carrier === "pi" ? "Pi" : current?.carrier || "Agent"} process exited (code=${code}, signal=${signal})`,
       });
       this.runtimes.delete(agentId);
+      log?.note("process_exit", { code, signal, expected });
+      log?.end();
+      this.agentLogs.delete(agentId);
       this.#record(agentId, "process_exit", { code, signal, at, expected });
+      this.#releaseLoggerIfIdle().catch(() => {});
     });
+  }
+
+  /** Flush and close the Hub log stream. Call once during daemon shutdown. */
+  async closeLogs() {
+    await Promise.allSettled([...this.agentLogs.values()].map((log) => log.end()));
+    this.agentLogs.clear();
+    const logger = this.logger;
+    this.logger = null;
+    if (logger) await logger.close();
+  }
+
+  logStats() {
+    if (!this.logger) return null;
+    return this.logger.stats();
+  }
+
+  #ensureLogger() {
+    if (this.logger) return this.logger;
+    this.logger = createHubLogWriter({ dir: resolveHubLogDir(this.paths), debug: this.logDebug });
+    return this.logger;
+  }
+
+  // The rotating stream keeps the process alive while open, so close it once the
+  // last Agent adapter is gone instead of holding it for the whole process.
+  async #releaseLoggerIfIdle() {
+    if (this.injectedLogger || this.agentLogs.size > 0 || !this.logger) return;
+    const logger = this.logger;
+    this.logger = null;
+    try { await logger.close(); } catch {}
   }
 
   async createAgent(spec = {}) {
@@ -162,21 +259,27 @@ export class AgentManager extends EventEmitter {
       if (!this.carrierRegistry || !this.skillRegistry) throw new Error("platform registries are unavailable");
       const diagnostic = await this.carrierRegistry.diagnose(carrier, { paths: this.paths, env: process.env });
       if (!diagnostic.available) throw new Error(`carrier ${carrier} is unavailable: ${diagnostic.reason || "unknown reason"}`);
-      authorization = this.skillRegistry.resolveAuthorization(spec.skillPolicy);
+      authorization = await this.#resolveSkillAuthorization(spec.skillPolicy);
     }
     const route = platform ? await this.#resolvePlatformProvider(carrier, spec)
       : { provider: spec.provider || null, model: spec.model || null };
     const thinking = spec.thinking || null;
     if (thinking && !VALID_THINKING.has(thinking)) throw new Error(`unsupported thinking level: ${thinking}`);
+    // Resolve before any provisioning so an unsupported or invalid prompt
+    // leaves no half-created agent directory behind.
+    const promptConfig = resolvePromptConfig(promptInput(spec), { carrier });
     const name = String(spec.name || `agent-${id.slice(0, 8)}`);
     const workspaceMode = spec.workspaceMode || "shared";
     if (workspaceMode !== "shared") {
       throw new Error("workspaceMode must be shared in 1.0; isolated workspaces are not implemented yet");
     }
     const privatePaths = this.#provision(id, carrier, platform);
+    // Frozen once, then re-read verbatim on every restart: later global changes
+    // cannot alter a running Agent's system prompt.
+    this.#freezePrompt(privatePaths.stateDir, promptConfig);
     const sessionId = newId();
     const now = nowIso();
-    this.store.createAgent({
+    const record = {
       id,
       name,
       cwd,
@@ -201,13 +304,16 @@ export class AgentManager extends EventEmitter {
       last_error: null,
       created_at: now,
       updated_at: now,
-    });
+    };
+    if (this.promptConfigColumn) record.prompt_config_json = JSON.stringify(promptConfig);
+    this.store.createAgent(record);
     this.#record(id, "agent_created", {
       name,
       cwd,
       workspaceMode,
       profileDigest: this.profile.digest,
       sharedWorkspaceWarning: workspaceMode === "shared",
+      prompt: promptSummary(promptConfig),
       ...(platform ? { carrier, skillDigest: authorization.digest } : {}),
     });
     try {
@@ -244,10 +350,15 @@ export class AgentManager extends EventEmitter {
       skills: agent.skills,
       extensions: agent.extensions,
       authorization: agent.skill_authorization,
+      promptConfig: this.#frozenPrompt(agent),
     };
+    const logger = this.#ensureLogger();
+    const agentLog = logger.createAgentLogWriter({ agentId: id, carrier: agent.carrier || "pi", source: "hub-manager" });
+    this.agentLogs.set(id, agentLog);
+    agentLog.note("runtime_start", { carrier: agent.carrier || "pi", sessionId: agent.session_id });
     const runtime = agent.skill_authorization
-      ? this.carrierRegistry.createRuntime(agent.carrier, { paths: this.paths, spec: runtimeSpec, env: process.env })
-      : this.runtimeFactory({ piCliPath: this.paths.piCliPath, spec: runtimeSpec });
+      ? this.carrierRegistry.createRuntime(agent.carrier, { paths: this.paths, spec: runtimeSpec, env: process.env, logger })
+      : this.runtimeFactory({ piCliPath: this.paths.piCliPath, spec: runtimeSpec, logger });
     this.runtimes.set(id, runtime);
     this.#wireRuntime(id, runtime);
     this.store.updateAgent(id, { status: "starting", desired_state: "running", last_error: null });
@@ -257,6 +368,10 @@ export class AgentManager extends EventEmitter {
     } catch (error) {
       try { await runtime.stop(); } catch {}
       if (this.runtimes.get(id) === runtime) this.runtimes.delete(id);
+      agentLog.note("runtime_start_failed", { message: error.message }, "error");
+      await agentLog.end();
+      this.agentLogs.delete(id);
+      await this.#releaseLoggerIfIdle();
       throw error;
     }
     const hasResolvedModel = state?.model
@@ -274,6 +389,7 @@ export class AgentManager extends EventEmitter {
       thinking: hasResolvedModel ? (state.thinkingLevel || agent.thinking) : agent.thinking,
     });
     this.#record(id, "agent_ready", { pid: runtime.pid, sessionId: state?.sessionId || agent.session_id });
+    agentLog.note("agent_ready", { pid: runtime.pid });
     if (initialPrompt) await this.send(id, "prompt", initialPrompt);
     return initialPrompt ? this.store.getAgent(id) : started;
   }
@@ -340,6 +456,74 @@ export class AgentManager extends EventEmitter {
   importSkill(spec) {
     if (!this.skillRegistry) throw new Error("Skill registry is unavailable");
     return this.skillRegistry.importSkill(spec);
+  }
+
+  async #resolveSkillManager() {
+    if (this.skillManager) return this.skillManager;
+    if (!this.skillManagerModulePromise) {
+      this.skillManagerModulePromise = import("./skills/manager-connection.js")
+        .then((module) => new module.SkillManagerConnection({ home: this.paths.home }))
+        .catch((error) => {
+          this.skillManagerModulePromise = null;
+          throw new Error(`Skill Manager connection is unavailable: ${error.message}`);
+        });
+    }
+    return this.skillManagerModulePromise;
+  }
+
+  async #optionalSkillManager() {
+    try {
+      return await this.#resolveSkillManager();
+    } catch {
+      return null;
+    }
+  }
+
+  // Connected Skill Manager is opt-in. Without an explicit connection the
+  // registry catalog keeps its existing default authorization semantics.
+  async #resolveSkillAuthorization(policy) {
+    const connection = await this.#optionalSkillManager();
+    if (!connection || !(await connection.status()).connected) return this.skillRegistry.resolveAuthorization(policy);
+    const sources = await connection.resolveSources(policy);
+    for (const source of sources) {
+      this.skillRegistry.importSkill({
+        id: source.id,
+        sourcePath: source.sourcePath,
+        sourceLabel: `skills-manager:${source.name || source.id}`,
+      });
+    }
+    // Freeze exactly this snapshot list so later manager changes cannot expand it.
+    return this.skillRegistry.resolveAuthorization({ mode: "only", ids: sources.map((source) => source.id) });
+  }
+
+  async skillManagerStatus({ live = false } = {}) {
+    const connection = await this.#resolveSkillManager();
+    const status = await connection.status({ live });
+    return { ...status, skills: status.connected ? connection.listSkills() : [] };
+  }
+
+  async connectSkillManager(input = {}) {
+    const connection = await this.#resolveSkillManager();
+    const result = await connection.connect(input);
+    this.#record(null, "skill_manager_connected", {
+      skillCount: result?.snapshot?.skillCount ?? null,
+      source: result?.config?.source || null,
+    });
+    return { ...(await this.skillManagerStatus({ live: true })), result };
+  }
+
+  async syncSkillManager(input = {}) {
+    const connection = await this.#resolveSkillManager();
+    const result = await connection.sync(input);
+    this.#record(null, "skill_manager_synced", { synced: Boolean(result?.synced), skillCount: result?.snapshot?.skillCount ?? null });
+    return { ...(await this.skillManagerStatus({ live: true })), result };
+  }
+
+  async disconnectSkillManager(input = {}) {
+    const connection = await this.#resolveSkillManager();
+    const result = await connection.disconnect(input);
+    this.#record(null, "skill_manager_disconnected", { snapshotKept: Boolean(result?.snapshotKept) });
+    return { ...(await this.skillManagerStatus()), result };
   }
 
   async send(id, kind, message) {

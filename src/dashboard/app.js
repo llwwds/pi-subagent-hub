@@ -6,6 +6,8 @@ const state = {
   activeCount: 0, managedCount: 0, view: "agents", refreshBusy: false, metadataBusy: false,
   providers: { switch: { available: false, reason: "正在读取 CC Switch 状态…" }, apps: { pi: [], codex: [], claude: [] } },
   providersError: null, providersBusy: false,
+  prompts: { principles: [], defaultPrincipleIds: [] }, promptsError: null,
+  skillManager: null, skillManagerBusy: false,
 };
 
 const STATUS = {
@@ -230,8 +232,7 @@ function renderAgentList() {
   } else for (const agent of agents) list.append(agentCard(agent));
 }
 
-function renderSkillGallery() {
-  const list = $("#skills-list");
+function renderSkillGallery() {  const list = $("#skills-list");
   list.replaceChildren();
   if (!state.skills.length) {
     const empty = document.createElement("div");
@@ -466,6 +467,7 @@ function renderCarrierNote({ selectDefault = false } = {}) {
   renderCreateProviders({ selectDefault });
   updateThinkingControl();
   updateSkillSelector();
+  updatePromptControls();
 }
 function renderCreateSkills() {
   const container = $("#create-skill-options");
@@ -500,6 +502,160 @@ function updateSkillSelector() {
   const hasProvider = !state.providersError && state.providers.switch?.available
     && providerAppList(carrier?.id).some(providerReady);
   $("#create-submit").disabled = !carrier?.available || !hasProvider || (only && !selectionAvailable);
+}
+
+// Append-only system prompt: the panel never sends a replace-style prompt, and
+// a carrier without append support keeps the controls disabled instead of
+// silently degrading into a normal user message.
+function promptSupportFor(carrierId) {
+  return state.carriers.find((item) => item.id === carrierId)?.capabilities?.systemPrompt || null;
+}
+
+function renderCreatePrinciples({ preserveSelection = true } = {}) {
+  const container = $("#create-principles");
+  if (!container) return;
+  const selected = new Set([...container.querySelectorAll('input[name="principle"]:checked')].map((input) => input.value));
+  // form.reset() clears only defaultChecked/defaultValue, so an explicit reset
+  // must fall back to the server-provided defaults instead of "nothing checked".
+  const keepSelection = preserveSelection && container.childElementCount > 0;
+  container.replaceChildren();
+  if (!state.prompts.principles.length) {
+    const note = document.createElement("p");
+    note.className = "skill-selector-empty";
+    note.textContent = state.promptsError || "原则目录不可用，本次创建将不追加系统提示。";
+    container.append(note);
+    return;
+  }
+  for (const principle of state.prompts.principles) {
+    const row = document.createElement("label"); row.className = "skill-check";
+    const input = document.createElement("input");
+    input.type = "checkbox"; input.name = "principle"; input.value = principle.id;
+    const checked = keepSelection ? selected.has(principle.id) : state.prompts.defaultPrincipleIds.includes(principle.id);
+    input.checked = checked;
+    input.defaultChecked = checked;
+    const text = document.createElement("span");
+    const name = document.createElement("strong"); name.textContent = principle.title;
+    const detail = document.createElement("small"); detail.textContent = principle.text;
+    text.append(name, detail); row.append(input, text); container.append(row);
+  }
+}
+
+const PROMPT_CHANNEL_LABELS = { append: "system prompt 末尾追加", developer: "Codex developer 指令层追加" };
+
+function updatePromptControls() {
+  const fieldset = $("#prompt-fieldset");
+  if (!fieldset) return;
+  const carrierId = $("#create-carrier").value;
+  const support = promptSupportFor(carrierId);
+  const supported = Boolean(support);
+  for (const input of fieldset.querySelectorAll("input, textarea")) input.disabled = !supported;
+  const note = $("#prompt-support-note");
+  note.classList.toggle("hidden", false);
+  note.textContent = supported
+    ? `${carrierLabel(carrierId)} 通过${PROMPT_CHANNEL_LABELS[support] || support}生效；只追加，不替换载体自带约束。`
+    : `${carrierLabel(carrierId)} 没有可用的追加通道，平台会拒绝为它显式注入系统提示。`;
+}
+
+async function loadPrompts() {
+  try {
+    const data = await api("/v2/prompts");
+    state.prompts = {
+      principles: Array.isArray(data?.principles) ? data.principles : [],
+      defaultPrincipleIds: Array.isArray(data?.defaultPrincipleIds) ? data.defaultPrincipleIds : [],
+    };
+    state.promptsError = null;
+  } catch (error) {
+    state.promptsError = `原则目录读取失败：${error.message}`;
+  }
+  renderCreatePrinciples(); updatePromptControls();
+}
+
+function skillManagerMeta() {
+  const status = state.skillManager;
+  if (!status) return { text: "正在读取 Skills Manager 状态…", tone: "pending" };
+  if (status.connected) {
+    const count = status.snapshot?.skillCount;
+    return { text: `已连接 · ${status.manager?.version || status.config?.managerVersion || "版本未知"} · ${Number.isFinite(count) ? `${count} 份快照` : "快照未知"}`, tone: "connected" };
+  }
+  if (status.manager && status.manager.available === false) {
+    return { text: status.manager.reason || "Skills Manager 不可用", tone: "unavailable" };
+  }
+  return { text: "未连接（需手动连接，不会自动连接全局库）", tone: "idle" };
+}
+
+function renderSkillManager() {
+  const container = $("#skill-manager");
+  if (!container) return;
+  const status = state.skillManager;
+  const meta = skillManagerMeta();
+  container.replaceChildren();
+  const head = document.createElement("div"); head.className = "skill-manager-head";
+  const title = document.createElement("div");
+  const overline = document.createElement("span"); overline.className = "overline"; overline.textContent = "SKILLS MANAGER";
+  const heading = document.createElement("h3"); heading.textContent = "外部 Skill 库连接";
+  title.append(overline, heading);
+  const chip = document.createElement("span"); chip.className = `manager-status ${meta.tone}`; chip.textContent = meta.text;
+  head.append(title, chip);
+  container.append(head);
+
+  const facts = document.createElement("dl");
+  facts.className = "skill-manager-facts";
+  const rows = [];
+  if (status?.manager?.cliPath) rows.push(["CLI", status.manager.cliPath]);
+  if (status?.snapshot?.syncedAt) rows.push(["最近同步", timeLabel(status.snapshot.syncedAt)]);
+  if (status?.snapshot?.digest) rows.push(["快照摘要", short(status.snapshot.digest, 24)]);
+  if (status?.config?.selection) rows.push(["选择范围", JSON.stringify(status.config.selection)]);
+  if (status?.drift) rows.push(["变更", `新增 ${status.drift.added?.length || 0} · 移除 ${status.drift.removed?.length || 0}`]);
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value; dd.title = value;
+    facts.append(dt, dd);
+  }
+  container.append(facts);
+
+  const actions = document.createElement("div"); actions.className = "skill-manager-actions";
+  const add = (label, action, variant, disabled) => {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = `button ${variant}`; button.textContent = label;
+    button.dataset.managerAction = action; button.disabled = Boolean(disabled) || state.skillManagerBusy;
+    actions.append(button);
+  };
+  const available = status?.manager ? status.manager.available !== false : true;
+  add(status?.connected ? "重新连接" : "连接 Skills Manager", "connect", "button-primary", !available);
+  add("同步快照", "sync", "button-secondary", !status?.connected);
+  add("断开连接", "disconnect", "button-secondary", !status?.connected);
+  container.append(actions);
+
+  const note = document.createElement("p"); note.className = "skill-manager-note";
+  note.textContent = status?.connected
+    ? "同步只读取管理器目录，不会部署或改动管理器内容。创建 Agent 时会把所选 Skill 复制进平台私有存储并冻结；已创建的 Agent 不受断开或后续同步影响。"
+    : "连接需要显式点击，平台不会自动连接或改写全局 Skill 库。未连接时继续使用平台已导入的快照。";
+  container.append(note);
+}
+
+async function loadSkillManager() {
+  try {
+    state.skillManager = await api("/v2/skills/manager");
+  } catch (error) {
+    state.skillManager = { connected: false, manager: { available: false, reason: error.message } };
+  }
+  renderSkillManager();
+}
+
+async function runSkillManagerAction(action) {
+  if (state.skillManagerBusy) return;
+  state.skillManagerBusy = true;
+  renderSkillManager();
+  try {
+    await api(`/v2/skills/manager/${action}`, { method: "POST", body: "{}" });
+    toast({ connect: "Skills Manager 已连接", sync: "Skill 快照已同步", disconnect: "已断开 Skills Manager" }[action] || "操作完成");
+    await loadSkillManager();
+  } catch (error) {
+    toast(`操作失败：${error.message}`, true);
+  } finally {
+    state.skillManagerBusy = false;
+    renderSkillManager();
+  }
 }
 
 function eventSummary(event) {
@@ -620,6 +776,33 @@ function renderDetail() {
         : !["running", "idle", "waiting_input", "starting"].includes(agent.status);
   }
   const busyCli = carrierId(agent) !== "pi" && agent.status === "running";
+  const promptConfig = agent.promptConfig || null;
+  const promptSummary = $("#detail-prompt-summary");
+  const promptList = $("#detail-prompt-list");
+  const promptDetails = $("#detail-prompt-details");
+  const promptText = $("#detail-prompt-text");
+  promptList.replaceChildren();
+  if (!promptConfig) {
+    promptSummary.textContent = "旧版 Agent · 未记录";
+    promptDetails.classList.add("hidden");
+  } else if (promptConfig.mode !== "append") {
+    promptSummary.textContent = "未追加（使用载体自带系统提示）";
+    promptDetails.classList.add("hidden");
+  } else {
+    const channel = promptConfig.channel || promptConfig.support;
+    promptSummary.textContent = `${PROMPT_CHANNEL_LABELS[channel] || "追加"} · ${promptConfig.promptChars} 字符 · ${short(promptConfig.digest, 18)}`;
+    promptSummary.title = promptConfig.resolvedAt ? `解析于 ${timeLabel(promptConfig.resolvedAt)}` : "";
+    for (const id of promptConfig.principleIds || []) {
+      const chip = document.createElement("span");
+      const principle = state.prompts.principles.find((item) => item.id === id);
+      chip.textContent = principle?.title || id; chip.title = id; promptList.append(chip);
+    }
+    if (promptConfig.customTextChars) {
+      const chip = document.createElement("span"); chip.textContent = `自定义正文 ${promptConfig.customTextChars} 字符`; promptList.append(chip);
+    }
+    promptDetails.classList.remove("hidden");
+    promptText.textContent = promptConfig.prompt || "（创建时未保存正文）";
+  }
   $("#message-form").querySelector("button[type=submit]").disabled = busyCli || !["running", "idle", "waiting_input"].includes(agent.status);
   $("#message").placeholder = busyCli ? "当前回合执行中，请等待完成后发送下一条消息。" : "向当前 Agent 发送消息…";
   renderTimeline(agent); renderEvents();
@@ -653,11 +836,24 @@ async function selectAgent(id) {
 async function loadMetadata({ quiet = true } = {}) {
   if (state.metadataBusy) return;
   state.metadataBusy = true;
-  const [carriersResult, skillsResult] = await Promise.allSettled([api("/v2/carriers"), api("/v2/skills")]);
+  const [carriersResult, skillsResult, promptsResult, managerResult] = await Promise.allSettled([
+    api("/v2/carriers"), api("/v2/skills"), api("/v2/prompts"), api("/v2/skills/manager"),
+  ]);
   if (carriersResult.status === "fulfilled") state.carriers = Array.isArray(carriersResult.value) ? carriersResult.value : [];
   if (skillsResult.status === "fulfilled") state.skills = Array.isArray(skillsResult.value) ? skillsResult.value : [];
+  if (promptsResult.status === "fulfilled") {
+    const data = promptsResult.value;
+    state.prompts = {
+      principles: Array.isArray(data?.principles) ? data.principles : [],
+      defaultPrincipleIds: Array.isArray(data?.defaultPrincipleIds) ? data.defaultPrincipleIds : [],
+    };
+    state.promptsError = null;
+  } else state.promptsError = `原则目录读取失败：${promptsResult.reason?.message || "未知错误"}`;
+  if (managerResult.status === "fulfilled") state.skillManager = managerResult.value;
+  else state.skillManager = { connected: false, manager: { available: false, reason: managerResult.reason?.message || "Skills Manager 状态不可用" } };
   state.metadataBusy = false;
-  renderCarrierFilter(); renderCreateCarriers(); renderCreateSkills(); renderSkillGallery(); renderMetrics(); renderAgentList(); renderDetail();
+  renderCarrierFilter(); renderCreateCarriers(); renderCreateSkills(); renderCreatePrinciples(); renderSkillGallery();
+  renderSkillManager(); renderMetrics(); renderAgentList(); renderDetail();
   if (!quiet && carriersResult.status === "rejected") toast(`载体列表读取失败：${carriersResult.reason.message}`, true);
   else if (!quiet && skillsResult.status === "rejected") toast(`Skill 广场读取失败：${skillsResult.reason.message}`, true);
 }
@@ -719,6 +915,10 @@ $("#verbose-events").addEventListener("change", renderEvents);
 $("#create-carrier").addEventListener("change", () => renderCarrierNote({ selectDefault: true }));
 $("#create-provider").addEventListener("change", () => renderCreateModels({ selectDefault: true }));
 for (const input of document.querySelectorAll('input[name="skill-mode"]')) input.addEventListener("change", updateSkillSelector);
+$("#skill-manager").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-manager-action]");
+  if (button) runSkillManagerAction(button.dataset.managerAction);
+});
 $("#new-agent").addEventListener("click", async () => { await Promise.all([loadMetadata(), loadProviders()]); $("#create-error").textContent = ""; $("#create-dialog").showModal(); });
 for (const button of document.querySelectorAll("[data-action]")) button.addEventListener("click", () => runAction(button.dataset.action));
 
@@ -752,10 +952,17 @@ $("#create-form").addEventListener("submit", async (event) => {
     carrier,
     skillPolicy: mode === "only" ? { mode: "only", ids: data.getAll("skill-id").map(String) } : { mode: "all" },
   };
+  const promptSupported = Boolean(carrierInfo.capabilities?.systemPrompt);
+  body.promptConfig = {
+    // Unsupported carriers must stay creatable with default payloads; only an
+    // explicit injection request is rejected by the server.
+    principleIds: promptSupported ? data.getAll("principle").map(String) : [],
+    customText: promptSupported ? String(data.get("system-prompt") || "") : "",
+  };
   $("#create-submit").disabled = true;
   try {
     const created = await api("/v2/agents", { method: "POST", body: JSON.stringify(body) });
-    form.reset(); renderCreateProviders({ selectDefault: true }); updateSkillSelector();
+    form.reset(); renderCreateProviders({ selectDefault: true }); updateSkillSelector(); renderCreatePrinciples({ preserveSelection: false }); updatePromptControls();
     $("#create-dialog").close();
     await refresh({ quiet: true });
     await selectAgent(created.id);
@@ -851,6 +1058,6 @@ $("#message-form").addEventListener("submit", async (event) => {
   } catch (error) { toast(error.message, true); }
 });
 
-await Promise.all([loadMetadata(), loadProviders(), refresh({ quiet: true })]);
+await Promise.all([loadMetadata(), loadProviders(), loadPrompts(), refresh({ quiet: true })]);
 setInterval(() => refresh({ quiet: true }), 2400);
 setInterval(() => { loadMetadata(); loadProviders(); }, 30000);

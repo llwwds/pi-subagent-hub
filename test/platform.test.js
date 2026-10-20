@@ -96,6 +96,7 @@ test("platform creation keeps v1 behavior and exposes frozen v2 Skill selections
     assert.ok(logs.some((event) => JSON.stringify(event.payload).includes("test-prompt")));
   } finally {
     await manager.stopAll();
+    await manager.closeLogs();
     if (server.listening) await new Promise((resolvePromise) => server.close(resolvePromise));
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -127,6 +128,7 @@ test("failed platform runtime startup releases its slot so the agent can restart
     assert.equal(restarted.status, "idle");
   } finally {
     await manager.stopAll();
+    await manager.closeLogs();
     store.close();
     rmSync(root, { recursive: true, force: true });
   }
@@ -172,7 +174,81 @@ test("v2 Pi selects a private CC Switch route while v1 keeps its original config
     assert.deepEqual((await response.json()).data.apps.pi.map((item) => item.id), ["demo"]);
   } finally {
     await manager.stopAll();
+    await manager.closeLogs();
     if (server.listening) await new Promise((done) => server.close(done));
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("v2 agent detail returns the frozen prompt text while v1 keeps its legacy shape", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pihub-platform-prompt-"));
+  const paths = resolveHubPaths(root);
+  paths.piCliPath = resolve("fixtures/fake-pi-rpc.js");
+  ensureHubLayout(paths);
+  const store = new HubStore(paths.databasePath);
+  const profile = resolveProfile({ schemaVersion: 1, name: "test", tools: ["read"], skills: [], extensions: [] });
+  const manager = new AgentManager({
+    paths,
+    store,
+    profile,
+    skillRegistry: new SkillRegistry({ home: root }),
+    carrierRegistry: createDefaultCarrierRegistry({ codexCliPath: "/missing/codex", claudeCliPath: "/missing/claude" }),
+  });
+  const token = "platform-prompt-token";
+  const server = createHubServer({ manager, store, paths, token, onStop() {} });
+  await new Promise((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const get = async (path) => {
+    const response = await fetch(`${base}${path}`, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(response.status, 200, `${path} should answer 200`);
+    return (await response.json()).data;
+  };
+  try {
+    await manager.createPlatformAgent({
+      agentId: "v2-prompt",
+      cwd: root,
+      promptConfig: { principleIds: ["first-principles", "no-unnecessary-entities"], customText: "多行\n自定义 $HOME `id`" },
+    });
+    await manager.createAgent({
+      agentId: "v1-prompt",
+      cwd: root,
+      promptConfig: { principleIds: ["first-principles"], customText: "legacy text" },
+    });
+
+    const detail = await get("/v2/agents/v2-prompt");
+    assert.equal(detail.promptConfig.mode, "append");
+    assert.equal(detail.promptConfig.channel, "append", "pi appends to the native system prompt");
+    assert.deepEqual(detail.promptConfig.principleIds, ["first-principles", "no-unnecessary-entities"]);
+    assert.equal(detail.promptConfig.customText, "多行\n自定义 $HOME `id`", "custom text stays literal, never shell-expanded");
+    assert.match(detail.promptConfig.prompt, /### 工作原则/);
+    assert.match(detail.promptConfig.prompt, /多行\n自定义 \$HOME `id`/);
+    assert.equal(detail.promptConfig.customTextChars, "多行\n自定义 $HOME `id`".length);
+    assert.match(detail.promptConfig.digest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(detail.promptConfig.digest, manager.promptConfigOf(store.getAgent("v2-prompt")).digest);
+    assert.equal(detail.prompt_config_json, undefined, "raw store column must not leak");
+    assert.equal(detail.prompt_config, undefined);
+
+    await manager.restartAgent("v2-prompt");
+    const restarted = await get("/v2/agents/v2-prompt");
+    assert.equal(restarted.promptConfig.digest, detail.promptConfig.digest, "restart reuses the frozen digest");
+    assert.equal(restarted.promptConfig.prompt, detail.promptConfig.prompt);
+
+    const legacyDetail = await get("/v1/agents/v1-prompt");
+    assert.equal(legacyDetail.id, "v1-prompt");
+    assert.equal(Object.hasOwn(legacyDetail, "promptConfig"), false, "/v1 keeps its original shape");
+    assert.equal(Object.hasOwn(legacyDetail, "prompt_config_json"), false);
+    assert.equal(Object.hasOwn(legacyDetail, "prompt_config"), false);
+    assert.equal(Object.hasOwn(legacyDetail, "skillPolicy"), false);
+
+    // A legacy Agent still gets a normalized v2 view when asked through /v2.
+    const legacyViaV2 = await get("/v2/agents/v1-prompt");
+    assert.equal(legacyViaV2.promptConfig.mode, "append");
+    assert.equal(legacyViaV2.promptConfig.digest, manager.promptConfigOf(store.getAgent("v1-prompt")).digest);
+  } finally {
+    await manager.stopAll();
+    await manager.closeLogs();
+    if (server.listening) await new Promise((resolvePromise) => server.close(resolvePromise));
     store.close();
     rmSync(root, { recursive: true, force: true });
   }

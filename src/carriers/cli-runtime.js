@@ -1,19 +1,19 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
-  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
   readlinkSync,
   symlinkSync,
-  createWriteStream,
   readFileSync,
   writeFileSync,
 } from "node:fs";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { StrictJsonlParser } from "../jsonl.js";
+import { createAgentLogWriter } from "../logging.js";
+import { assertPromptSupported, promptLaunchArgs } from "../prompts.js";
 import { atomicWriteJson, newId, nowIso, readJson, sleep } from "../utils.js";
 import { findExecutable } from "./executable.js";
 import { preparePrivateHubCli } from "./hub-cli.js";
@@ -91,7 +91,7 @@ function errorMessage(value) {
 // A CLI turn is one process. The platform runtime remains alive between turns so
 // the manager can resume the same private session without exposing vendor state.
 export class CliExecRuntime extends EventEmitter {
-  constructor({ carrier, executable, spec, env = process.env }) {
+  constructor({ carrier, executable, spec, env = process.env, logger = null }) {
     super();
     if (carrier !== "codex" && carrier !== "claude") throw new Error(`unsupported CLI carrier: ${carrier}`);
     if (!spec?.cwd || !spec?.stateDir || !spec?.logsDir || !spec?.sessionId) {
@@ -107,8 +107,10 @@ export class CliExecRuntime extends EventEmitter {
     this.turn = null;
     this.privateHome = join(spec.stateDir, `${carrier}-home`);
     this.sessionPath = join(spec.stateDir, `${carrier}-session.json`);
-    this.protocolLogPath = join(spec.logsDir, `${carrier}-protocol.jsonl`);
-    this.stderrLogPath = join(spec.logsDir, `${carrier}-stderr.log`);
+    // Diagnostics go to the single Hub log file family, never to a per-Agent file.
+    this.agentLog = logger?.createAgentLogWriter
+      ? logger.createAgentLogWriter({ agentId: spec.id, carrier, source: "cli-runtime" })
+      : null;
     this.sessionId = null;
     this.skillsDir = null;
     this.skillMountRoot = null;
@@ -174,6 +176,7 @@ export class CliExecRuntime extends EventEmitter {
     if (this.spec.ccSwitch && this.carrier === "codex" && this.spec.thinking) {
       throw new Error("CC Switch Codex shared sessions configure reasoning effort in the provider profile; per-agent thinking is unavailable");
     }
+    assertPromptSupported(this.carrier, this.spec.promptConfig);
     this.#prepareHome();
     this.sessionId = readJson(this.sessionPath)?.sessionId || null;
     this.started = true;
@@ -190,6 +193,7 @@ export class CliExecRuntime extends EventEmitter {
       args.push("--skip-git-repo-check");
       if (this.spec.model) args.push("--model", this.spec.model);
       if (this.spec.thinking) args.push("-c", `model_reasoning_effort=\"${this.spec.thinking}\"`);
+      args.push(...promptLaunchArgs(this.carrier, this.spec.promptConfig));
       if (this.sessionId) args.push(this.sessionId);
       args.push("-");
       return this.spec.ccSwitch
@@ -200,6 +204,7 @@ export class CliExecRuntime extends EventEmitter {
     if (this.spec.skills?.length) args.push("--add-dir", this.skillMountRoot);
     if (this.spec.model) args.push("--model", this.spec.model);
     if (this.spec.thinking) args.push("--effort", this.spec.thinking);
+    args.push(...promptLaunchArgs(this.carrier, this.spec.promptConfig));
     if (this.sessionId) args.push("--resume", this.sessionId);
     else args.push("--session-id", this.spec.sessionId);
     args.push("--output-format", "stream-json", "--verbose", "-p");
@@ -242,7 +247,7 @@ export class CliExecRuntime extends EventEmitter {
   }
 
   #log(direction, value) {
-    appendFileSync(this.protocolLogPath, `${JSON.stringify({ at: nowIso(), direction, value })}\n`, { mode: 0o600 });
+    this.agentLog?.protocol(direction, value);
   }
 
   #handleOutput(value, turn) {
@@ -291,8 +296,8 @@ export class CliExecRuntime extends EventEmitter {
     const turn = { child, error: null, aborted: false, launchError: null, sawFinal: false };
     this.turn = turn;
     child.stdin.on("error", (error) => { turn.error ||= error.message; });
-    const stderrStream = createWriteStream(this.stderrLogPath, { flags: "a", mode: 0o600 });
-    child.stderr.pipe(stderrStream);
+    if (this.agentLog) child.stderr.pipe(this.agentLog.stderr, { end: false });
+    else child.stderr.resume();
     const parser = new StrictJsonlParser({
       onValue: (value) => this.#handleOutput(value, turn),
       onError: (error, line) => {
@@ -305,7 +310,6 @@ export class CliExecRuntime extends EventEmitter {
     child.stdout.on("end", () => parser.finish());
     child.on("error", (error) => { turn.launchError = error; });
     child.on("close", (code, signal) => {
-      stderrStream.end();
       if (this.child === child) this.child = null;
       if (this.turn === turn) this.turn = null;
       if (this.stopping) {
@@ -350,6 +354,7 @@ export class CliExecRuntime extends EventEmitter {
     if (!this.started) return;
     this.started = false;
     this.stopping = false;
+    this.agentLog?.end();
     this.emit("exit", { code, signal, at: nowIso() });
   }
 

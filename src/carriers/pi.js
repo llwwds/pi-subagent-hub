@@ -11,6 +11,7 @@ export class PiCarrierAdapter {
     events: true,
     skillLoadingSelection: true,
     skillIsolation: false,
+    systemPrompt: "append",
   });
 
   diagnose({ paths } = {}) {
@@ -20,7 +21,7 @@ export class PiCarrierAdapter {
       : { available: false, reason: "Pi CLI bundle is unavailable; build the pinned Pi runtime first" };
   }
 
-  createRuntime({ paths, spec, env } = {}) {
+  createRuntime({ paths, spec, env, logger = null } = {}) {
     if (!paths?.piCliPath) throw new Error("Pi CLI path is required");
     const privateHome = join(spec.stateDir, "pi-home");
     mkdirSync(privateHome, { recursive: true, mode: 0o700 });
@@ -34,6 +35,6 @@ export class PiCarrierAdapter {
       cleanEnv.PIHUB_HOME = paths.home;
       cleanEnv.PATH = [hubBin, dirname(process.execPath), cleanEnv.PATH || "/usr/bin:/bin"].join(delimiter);
     }
-    return new PiRpcProcess({ piCliPath: paths.piCliPath, spec, env: cleanEnv });
+    return new PiRpcProcess({ piCliPath: paths.piCliPath, spec, env: cleanEnv, logger });
   }
 }

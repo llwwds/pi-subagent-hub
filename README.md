@@ -4,7 +4,7 @@
 
 当前稳定版：`1.0.0.0`（npm 元数据版本 `1.0.0`）。
 
-`2.0.0.0` 平台功能正在源码仓库开发：新增 Pi、Codex CLI、Claude Code CLI 载体接口、Skill 快照目录、CC Switch 私有供应商配置和 Web 看板。当前尚未发布或部署；正在运行的 `1.0.0.0` 部署不会自动使用这些源码。新接口和现阶段可用范围见 [`docs/platform-api.md`](docs/platform-api.md)，面板使用说明见 [`docs/user-guide.md`](docs/user-guide.md)。
+`2.1.0.0` 平台功能正在源码仓库开发：新增 Pi、Codex CLI、Claude Code CLI 载体接口、Skill 快照目录、CC Switch 私有供应商配置、Skills Manager 手动连接、System Prompt 注入和 Hub 级诊断日志。本仓库当前只发布源码状态，尚未发布 GitHub Release。源码与独立部署不自动同步：本仓库的改动不会进入、也不会替换任何现有部署，部署需要单独的一次显式操作才会变化。新接口和现阶段可用范围见 [`docs/platform-api.md`](docs/platform-api.md)，面板使用说明见 [`docs/user-guide.md`](docs/user-guide.md)，System Prompt 见 [`docs/system-prompts.md`](docs/system-prompts.md)，日志见 [`docs/logging.md`](docs/logging.md)，Skills Manager 见 [`docs/skills-manager.md`](docs/skills-manager.md)。
 
 ## 它解决什么问题
 

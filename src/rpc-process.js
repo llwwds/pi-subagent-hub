@@ -1,20 +1,22 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { appendFileSync, createWriteStream } from "node:fs";
-import { join } from "node:path";
 import { StrictJsonlParser } from "./jsonl.js";
+import { createAgentLogWriter } from "./logging.js";
+import { promptLaunchArgs } from "./prompts.js";
 import { newId, nowIso, sleep } from "./utils.js";
 
 export class PiRpcProcess extends EventEmitter {
-  constructor({ piCliPath, spec, env = process.env }) {
+  constructor({ piCliPath, spec, env = process.env, logger = null }) {
     super();
     this.piCliPath = piCliPath;
     this.spec = spec;
     this.baseEnv = env;
     this.child = null;
     this.pending = new Map();
-    this.protocolLogPath = join(spec.logsDir, "protocol.jsonl");
-    this.stderrLogPath = join(spec.logsDir, "stderr.log");
+    // Diagnostics go to the single Hub log file family, never to a per-Agent file.
+    this.agentLog = logger?.createAgentLogWriter
+      ? logger.createAgentLogWriter({ agentId: spec.id, carrier: "pi", source: "pi-rpc" })
+      : null;
   }
 
   get pid() {
@@ -42,6 +44,8 @@ export class PiRpcProcess extends EventEmitter {
     if (this.spec.provider) args.push("--provider", this.spec.provider);
     if (this.spec.model) args.push("--model", this.spec.model);
     if (this.spec.thinking) args.push("--thinking", this.spec.thinking);
+    // Append-only injection: Pi keeps its own system constraints and appends ours.
+    args.push(...promptLaunchArgs("pi", this.spec.promptConfig));
     return args;
   }
 
@@ -62,8 +66,8 @@ export class PiRpcProcess extends EventEmitter {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
-    const stderrStream = createWriteStream(this.stderrLogPath, { flags: "a", mode: 0o600 });
-    child.stderr.pipe(stderrStream);
+    if (this.agentLog) child.stderr.pipe(this.agentLog.stderr);
+    else child.stderr.resume();
 
     const parser = new StrictJsonlParser({
       onValue: (value) => this.#handleValue(value),
@@ -73,12 +77,12 @@ export class PiRpcProcess extends EventEmitter {
     child.stdout.on("end", () => parser.finish());
     child.on("error", (error) => this.emit("process_error", error));
     child.on("exit", (code, signal) => {
-      stderrStream.end();
       for (const { reject, timeout } of this.pending.values()) {
         clearTimeout(timeout);
         reject(new Error(`Pi process exited before response (code=${code}, signal=${signal})`));
       }
       this.pending.clear();
+      this.agentLog?.end();
       this.emit("exit", { code, signal, at: nowIso() });
     });
 
@@ -87,7 +91,7 @@ export class PiRpcProcess extends EventEmitter {
   }
 
   #handleValue(value) {
-    appendFileSync(this.protocolLogPath, `${JSON.stringify({ at: nowIso(), direction: "out", value })}\n`, { mode: 0o600 });
+    this.agentLog?.protocol("out", value);
     if (value?.type === "response" && value.id && this.pending.has(value.id)) {
       const pending = this.pending.get(value.id);
       this.pending.delete(value.id);
@@ -100,7 +104,7 @@ export class PiRpcProcess extends EventEmitter {
   }
 
   #handleProtocolError(error, line) {
-    appendFileSync(this.protocolLogPath, `${JSON.stringify({ at: nowIso(), direction: "error", error: error.message, line })}\n`, { mode: 0o600 });
+    this.agentLog?.protocol("error", { message: error.message, line });
     this.emit("protocol_error", { error, line });
   }
 
@@ -108,7 +112,7 @@ export class PiRpcProcess extends EventEmitter {
     if (!this.alive || !this.child.stdin.writable) return Promise.reject(new Error("Pi process is not running"));
     const id = newId();
     const command = { id, type, ...payload };
-    appendFileSync(this.protocolLogPath, `${JSON.stringify({ at: nowIso(), direction: "in", value: command })}\n`, { mode: 0o600 });
+    this.agentLog?.protocol("in", command);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);

@@ -47,6 +47,9 @@ async function shutdown() {
   closing = true;
   try { await manager.stopAll(); } catch (error) { process.stderr.write(`${error.stack || error}\n`); }
   await new Promise((resolvePromise) => server?.close(resolvePromise));
+  // Flush the single Hub log stream before the process exits; rotating-file-stream
+  // may still hold buffered lines and a pending drop summary.
+  try { await manager.closeLogs(); } catch (error) { process.stderr.write(`log close failed: ${error.stack || error}\n`); }
   store.close();
   try { unlinkSync(paths.daemonPath); } catch {}
   try { closeSync(lockFd); } catch {}

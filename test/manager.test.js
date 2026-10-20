@@ -16,25 +16,33 @@ test("manager gives concurrent agents distinct process and context roots with on
   const store = new HubStore(paths.databasePath);
   const profile = resolveProfile({ schemaVersion: 1, name: "test", tools: ["read"], skills: [], extensions: [] });
   const manager = new AgentManager({ paths, store, profile });
-  const [first, second] = await Promise.all([
-    manager.createAgent({ agentId: "agent-one", name: "one", cwd: root }),
-    manager.createAgent({ agentId: "agent-two", name: "two", cwd: root, thinking: "high" }),
-  ]);
-  assert.notEqual(first.pid, second.pid);
-  assert.notEqual(first.session_id, second.session_id);
-  assert.notEqual(first.session_dir, second.session_dir);
-  assert.notEqual(first.agent_dir, second.agent_dir);
-  assert.equal(first.profile_digest, second.profile_digest);
-  assert.equal(second.thinking, "high");
-  await manager.send("agent-one", "prompt", "marker-one");
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
-  const firstEvents = manager.listEvents({ agentId: "agent-one" });
-  const secondEvents = manager.listEvents({ agentId: "agent-two" });
-  assert.ok(firstEvents.some((event) => JSON.stringify(event.payload).includes("marker-one")));
-  assert.ok(secondEvents.every((event) => !JSON.stringify(event.payload).includes("marker-one")));
-  await manager.stopAll();
-  store.close();
-  rmSync(root, { recursive: true, force: true });
+  try {
+    const [first, second] = await Promise.all([
+      manager.createAgent({ agentId: "agent-one", name: "one", cwd: root }),
+      manager.createAgent({ agentId: "agent-two", name: "two", cwd: root, thinking: "high" }),
+    ]);
+    assert.notEqual(first.pid, second.pid);
+    assert.notEqual(first.session_id, second.session_id);
+    assert.notEqual(first.session_dir, second.session_dir);
+    assert.notEqual(first.agent_dir, second.agent_dir);
+    assert.equal(first.profile_digest, second.profile_digest);
+    assert.equal(second.thinking, "high");
+    await manager.send("agent-one", "prompt", "marker-one");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
+    const firstEvents = manager.listEvents({ agentId: "agent-one" });
+    const secondEvents = manager.listEvents({ agentId: "agent-two" });
+    // Streaming deltas are not persisted; the semantic message_end carries the text.
+    assert.ok(firstEvents.some((event) => JSON.stringify(event.payload).includes("marker-one")));
+    assert.ok(secondEvents.every((event) => !JSON.stringify(event.payload).includes("marker-one")));
+    // Both streams are isolated: no event id appears in the other Agent.
+    const firstIds = new Set(firstEvents.map((event) => event.event_id));
+    assert.ok(secondEvents.every((event) => !firstIds.has(event.event_id)));
+  } finally {
+    await manager.stopAll();
+    await manager.closeLogs();
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("manager rejects workspace isolation it cannot actually provide", async () => {
@@ -45,11 +53,16 @@ test("manager rejects workspace isolation it cannot actually provide", async () 
   const store = new HubStore(paths.databasePath);
   const profile = resolveProfile({ schemaVersion: 1, name: "test", tools: ["read"], skills: [], extensions: [] });
   const manager = new AgentManager({ paths, store, profile });
-  await assert.rejects(
-    manager.createAgent({ agentId: "agent-isolated", cwd: root, workspaceMode: "isolated" }),
-    /not implemented yet/,
-  );
-  assert.equal(store.getAgent("agent-isolated"), null);
-  store.close();
-  rmSync(root, { recursive: true, force: true });
+  try {
+    await assert.rejects(
+      manager.createAgent({ agentId: "agent-isolated", cwd: root, workspaceMode: "isolated" }),
+      /not implemented yet/,
+    );
+    assert.equal(store.getAgent("agent-isolated"), null);
+  } finally {
+    await manager.stopAll();
+    await manager.closeLogs();
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

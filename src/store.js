@@ -43,6 +43,7 @@ export class HubStore {
         extensions_json TEXT NOT NULL,
         carrier TEXT NOT NULL DEFAULT 'pi',
         skill_authorization_json TEXT,
+        prompt_config_json TEXT NOT NULL DEFAULT '{}',
         last_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -62,6 +63,8 @@ export class HubStore {
     const columns = new Set(this.db.prepare("PRAGMA table_info(agents)").all().map((row) => row.name));
     if (!columns.has("carrier")) this.db.exec("ALTER TABLE agents ADD COLUMN carrier TEXT NOT NULL DEFAULT 'pi'");
     if (!columns.has("skill_authorization_json")) this.db.exec("ALTER TABLE agents ADD COLUMN skill_authorization_json TEXT");
+    // Added after 2.0.0.0 landed: never rewritten, only appended in place.
+    if (!columns.has("prompt_config_json")) this.db.exec("ALTER TABLE agents ADD COLUMN prompt_config_json TEXT NOT NULL DEFAULT '{}'");
   }
 
   createAgent(agent) {
@@ -69,18 +72,20 @@ export class HubStore {
       ...agent,
       carrier: agent.carrier || "pi",
       skill_authorization_json: agent.skill_authorization_json || null,
+      prompt_config_json: agent.prompt_config_json
+        ?? (agent.prompt_config ? JSON.stringify(agent.prompt_config) : "{}"),
     };
     this.db.prepare(`
       INSERT INTO agents (
         id, name, cwd, workspace_mode, provider, model, thinking, status, desired_state, pid,
         session_id, session_file, session_dir, agent_dir, logs_dir, profile_digest,
         tools_json, skills_json, extensions_json, carrier, skill_authorization_json,
-        last_error, created_at, updated_at
+        prompt_config_json, last_error, created_at, updated_at
       ) VALUES (
         @id, @name, @cwd, @workspace_mode, @provider, @model, @thinking, @status, @desired_state, @pid,
         @session_id, @session_file, @session_dir, @agent_dir, @logs_dir, @profile_digest,
         @tools_json, @skills_json, @extensions_json, @carrier, @skill_authorization_json,
-        @last_error, @created_at, @updated_at
+        @prompt_config_json, @last_error, @created_at, @updated_at
       )
     `).run(record);
     return this.getAgent(agent.id);
