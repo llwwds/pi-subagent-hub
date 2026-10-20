@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/contracts",
+  "crates/core",
+  "crates/runtime",
+  "crates/app",
+  "crates/bin",
+]
+
+[workspace.package]
+version = "3.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+authors = ["llwwds"]
+repository = "https://github.com/llwwds/pi-subagent-hub"
+
+[workspace.dependencies]
+# Shared contract/runtime dependencies. Every crate uses the locked workspace
+# version; writers must not add a second copy or enable extra features locally.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+tokio = { version = "1.54.0", features = [
+  "rt-multi-thread",
+  "macros",
+  "process",
+  "io-util",
+  "sync",
+  "time",
+  "fs",
+  "net",
+  "signal",
+] }
+async-trait = "0.1.92"
+thiserror = "2.0.21"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+sha2 = "0.10.9"
+uuid = { version = "1.28.0", features = ["v4"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std", "serde"] }
+file-rotate = "0.8.0"
+libc = "0.2.177"
+
+# CLI / HTTP / dashboard dependencies (app and bin only).
+clap = { version = "4.6.7", features = ["derive"] }
+axum = { version = "0.8.9", features = ["http1", "json", "query", "tokio"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["json"] }
+askama = "0.16.1"
+
+# Test-only.
+tempfile = "3.27.0"
+
+[profile.release]
+# The pinned toolchain ships rust-objcopy without libLLVM; do not attempt
+# implicit symbol stripping. The recorded release hash is the unstripped binary.
+strip = "none"

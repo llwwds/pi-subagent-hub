@@ -2,9 +2,14 @@
 
 `pi-subagent-hub` 是一个面向人类与任意父 Agent 的本地控制面。它在独立边界内运行官方 [Pi Agent](https://github.com/earendil-works/pi)，可按需拉起多个拥有独立 context 的 Pi subagent，并通过同一套 CLI 和网页面板统一查看、调度与停止它们。
 
-当前稳定版：`1.0.0.0`（npm 元数据版本 `1.0.0`）。
+当前源码包含两条线：
 
-`2.1.0.0` 平台功能正在源码仓库开发：新增 Pi、Codex CLI、Claude Code CLI 载体接口、Skill 快照目录、CC Switch 私有供应商配置、Skills Manager 手动连接、System Prompt 注入和 Hub 级诊断日志。本仓库当前只发布源码状态，尚未发布 GitHub Release。源码与独立部署不自动同步：本仓库的改动不会进入、也不会替换任何现有部署，部署需要单独的一次显式操作才会变化。新接口和现阶段可用范围见 [`docs/platform-api.md`](docs/platform-api.md)，面板使用说明见 [`docs/user-guide.md`](docs/user-guide.md)，System Prompt 见 [`docs/system-prompts.md`](docs/system-prompts.md)，日志见 [`docs/logging.md`](docs/logging.md)，Skills Manager 见 [`docs/skills-manager.md`](docs/skills-manager.md)。
+- `3.0.0.0` Rust 自有运行层重写位于 [`rust/`](rust/README.md)：本地 development 状态，尚未发布 GitHub Release，也未部署到任何现有安装。
+- `2.1.0.0` Node 实现是已验收的行为参考（tag `v2.1.0.0`），用于对照，不再是 3.0 的默认执行路径。
+
+3.0 的构建、运行和隔离测试入口见 [`rust/README.md`](rust/README.md) 与 [`docs/rust-contracts.md`](docs/rust-contracts.md)。普通 CLI 只通过 loopback HTTP 访问 daemon；只有隐藏的 daemon 入口构造 Store/AgentManager/RuntimeFactory。源码与独立部署不自动同步：本仓库的改动不会进入、也不会替换任何现有部署，发布或部署需要单独的一次显式授权操作。
+
+`2.1.0.0` 平台功能包括 Pi、Codex CLI、Claude Code CLI 载体接口、Skill 快照目录、CC Switch 私有供应商配置、Skills Manager 手动连接、System Prompt 注入和 Hub 级诊断日志。新接口和现阶段可用范围见 [`docs/platform-api.md`](docs/platform-api.md)，面板使用说明见 [`docs/user-guide.md`](docs/user-guide.md)，System Prompt 见 [`docs/system-prompts.md`](docs/system-prompts.md)，日志见 [`docs/logging.md`](docs/logging.md)，Skills Manager 见 [`docs/skills-manager.md`](docs/skills-manager.md)。
 
 ## 它解决什么问题
 
@@ -19,41 +24,63 @@
 
 ## 环境要求
 
-- Node.js `>=22.19.0`
-- npm、Git
-- 当前在 macOS 上完成真实 Pi RPC 验证，并由 CI 在 Linux 上验证；Windows 尚未验证。
+- Rust/Cargo：构建和测试 3.0 原生 Hub。当前在 macOS aarch64、Rust 1.99.1 实测；Linux/Windows 的 3.0 原生路径尚未验收。
+- Node.js `>=22.19.0`：Pi 载体的外部 bundle 仍由 Node 执行；2.1 legacy 入口和测试也需要 Node。
+- Git；npm 仅用于 legacy、bootstrap 和 `npm link`。
+- 项目不自动安装工具链，不修改全局 PATH，不把构建缓存放进同步源。默认 target 在 `${TMPDIR:-/tmp}/pihub-rust-target`，可用 `CARGO_TARGET_DIR` 显式覆盖。
 
-首次 bootstrap 会从 GitHub 下载一份锁定版本的 Pi 源码，并从 npm Registry 安装同版本运行包。项目不会复用或修改你已有的 Pi 安装。
+## 快速开始（3.0 原生默认入口）
 
-## 快速开始
+开发/试用请 **显式指定一个私有 home**。普通 CLI 按 `PIHUB_HOME` 解析 home，
+如果当前 shell 继承了在用实例的值（例如部署中的 2.0），直接执行 `daemon start` /
+`daemon stop` 会操作那个实例。这里用临时目录隔离，不改 launcher 对 `PIHUB_HOME`
+的任何契约：
 
 ```bash
 git clone https://github.com/llwwds/pi-subagent-hub.git
 cd pi-subagent-hub
-git checkout v1.0.0.0
 
-npm run bootstrap:pi
-npm run check
-npm run smoke:pi
-npm link
+# 使用现有 Cargo；不会自动安装或改 PATH
+npm run build
+# 等价：bash rust/scripts/build-release.sh
+
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${TMPDIR:-/tmp}/pihub-rust-target}"
+export PIHUB_HOME="$(mktemp -d /tmp/pihub-dev-home.XXXXXX)"
+
+./bin/pihub config init --json
+./bin/pihub config validate --json
+./bin/pihub doctor --json
+./bin/pihub daemon start --json
+./bin/pihub panel
 ```
 
-初始化本地状态和私有配置：
+要跑带 daemon + panel 的真实开发环境，只用已核验的 QA helper（强制显式 canonical
+私有 home，并做 receipt + daemon.json + health + 真实进程身份核验，start/status/stop
+都不吃 ambient `PIHUB_HOME`）：
 
 ```bash
-pihub config init
-pihub config validate
-pihub doctor
+scripts/qa-instance.sh start  --home /tmp/pihub-rust-qa-<name>/hub \
+    --binary "${CARGO_TARGET_DIR}/release/pihub" --receipt /tmp/pihub-dev-qa.json
+scripts/qa-instance.sh status --home /tmp/pihub-rust-qa-<name>/hub \
+    --receipt /tmp/pihub-dev-qa.json
+scripts/qa-instance.sh stop   --home /tmp/pihub-rust-qa-<name>/hub \
+    --receipt /tmp/pihub-dev-qa.json --cleanup
 ```
 
-启动 daemon 和面板：
+`./bin/pihub` / `pihub` 是 3.0 Rust launcher。它只查找已构建的原生二进制；找不到时打印构建指令并失败，**不会**回退到旧 Node Hub。需要把命令链接到 PATH 时可执行 `npm link`，它会同时提供 `pihub`（3.0）和 `pihub-legacy`（2.1）。
+
+## 2.1 legacy 参考入口
+
+2.1 Node 实现保留为已验收的行为参考和对照测试，不是默认执行路径：
 
 ```bash
-pihub daemon start --json
-pihub panel
+npm ci
+npm run bootstrap:pi       # 只服务于 legacy/external Pi
+npm run check:legacy       # 2.1 Node 源码检查与测试
+node bin/pihub.js --help   # 或：pihub-legacy --help / npm run legacy
 ```
 
-`npm link` 只创建本机命令链接，不会发布 npm 包。若不想链接，也可以把下文的 `pihub` 替换为 `node bin/pihub.js`。
+两者不会静默互相调用。3.0 的构建、运行和隔离测试入口见 [`rust/README.md`](rust/README.md)；正式 3.0 本地 development 说明见 [`docs/releases/v3.0.0.0.md`](docs/releases/v3.0.0.0.md)。
 
 ## AI API：只改一个配置文件
 
@@ -187,24 +214,27 @@ Hub 不调用 `PATH` 中已有的 `pi`。它固定使用本项目 bootstrap 的�
 ## 开发与验证
 
 ```bash
-npm run bootstrap:pi  # 校验上游源码锁，并以 npm ci 重建锁定运行时
-npm run check         # 语法检查与单元/集成测试
-npm run smoke:pi      # 真实 Pi RPC 冒烟，不发起付费模型请求
+npm run build         # 构建 3.0 release 二进制（现有 Cargo）
+npm run check         # 3.0 Rust workspace 测试 + launcher/无 fallback 检查
+npm run check:legacy  # 2.1 Node 源码检查与测试（显式 legacy）
+npm run smoke:pi      # legacy/external Pi RPC 冒烟，不发起付费模型请求
 ```
 
 主要目录：
 
-- `src/`：CLI、daemon、RPC 监管、本地 API 和面板。
-- `test/`、`fixtures/`：测试和 fake Pi RPC。
-- `config/`：不含密钥的配置模板。
-- `docs/`：架构与版本发布说明。
+- `rust/crates/contracts`：3.0 共享契约；`core`/`runtime`/`app` 实现；`bin` 装配。
+- `bin/pihub`：3.0 原生 launcher；`bin/pihub.js`：显式 2.1 legacy 入口。
+- `src/`、`test/`、`fixtures/`：2.1 Node 参考实现与对照测试。
 - `vendor/*.lock.json`、`vendor/pi-runtime.package-lock.json`：Pi 源码和运行时的可复现锁。
+- `docs/releases/v3.0.0.0.md`：本轮 3.0 本地 development 说明。
 
 源码仓库与正式部署副本不会自动同步；发布或部署必须显式执行，避免开发中的修改直接影响正在运行的应用。
 
 ## 当前限制
 
-- v1.0 只实现 `shared` workspace mode；需要文件写入隔离时，请由调用方先准备不同工作目录或 Git worktree。
+- 3.0 是本地 development 状态：独立 parity 与 Gemini SSR/DOM 验收仍在进行；未发布、未部署、未切换生产。
+- 3.0 只实现 `shared` workspace mode；不实现进程池或 worktree。需要文件写入隔离时，请由调用方先准备不同工作目录。
+- 2.1 Node 代码保留为 legacy 参考；默认 `pihub` 不会再调用它。
 - skill/tool profile 在 agent 启动时冻结，运行中不热切换。
 - 不自动安装 skill、不自动批准 extension UI 请求。
 - “任意模型”指 Pi 内置、`models.json` 可配置或 extension 可注册的 provider/model；私有协议仍需对应适配器。

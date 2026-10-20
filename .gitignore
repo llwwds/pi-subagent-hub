@@ -17,3 +17,7 @@ config.local.json
 # Independently downloaded upstream Pi checkout
 vendor/pi/
 vendor/pi-runtime/
+
+# Rust build products (prefer CARGO_TARGET_DIR outside the sync tree)
+target/
+rust/target/

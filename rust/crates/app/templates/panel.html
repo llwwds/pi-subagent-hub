@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="pihub-token" content="{{ token }}">
+    <meta name="theme-color" content="#08090b">
+    <title>Subagent Hub · 控制台</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Subagent Hub 首页">
+        <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-wordmark">SUBAGENT <b>HUB</b><small>CONTROL PLANE / {{ version }}</small></span>
+      </a>
+      <nav class="main-nav" aria-label="主导航">
+        <a class="nav-item{% if view_agents %} active{% endif %}" href="{{ agents_href }}"{% if view_agents %} aria-current="page"{% endif %}>Agents</a>
+        <a class="nav-item{% if view_skills %} active{% endif %}" href="{{ skills_href }}"{% if view_skills %} aria-current="page"{% endif %}>Skill 广场 <span>{{ skill_count }}</span></a>
+        <a class="nav-item{% if view_providers %} active{% endif %}" href="{{ providers_href }}"{% if view_providers %} aria-current="page"{% endif %}>供应商 / CC Switch</a>
+      </nav>
+      <div class="top-actions">
+        <span id="connection" class="connection online"><i></i>本地在线</span>
+        <a id="refresh" class="icon-action" href="{{ refresh_href }}" title="立即同步" aria-label="立即同步">↻</a>
+        <a id="new-agent" class="button button-primary" href="?view=agents&amp;create=1" data-dialog="create-dialog"><span>＋</span> 创建 Agent</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="overview" aria-labelledby="overview-title">
+        <div class="overview-main">
+          <span class="overline">LIVE FLEET / 实时状态</span>
+          <h1 id="overview-title"><span id="hero-active">{{ active_count }}</span><span class="hero-caption">个 Agent 进程<br>在运行</span></h1>
+          <p>查看每个实例的载体、状态与 Skill 权限。托管会话单独统计。</p>
+        </div>
+        <div class="activity-panel" aria-label="Agent 状态分布">
+          <div class="activity-head"><span>ACTIVITY</span><span id="last-sync">同步于 {{ last_sync }}</span></div>
+          <div id="activity-track" class="activity-track">
+            {% if activity_empty %}<span class="activity-empty">暂无实例</span>{% endif %}
+            {% for node in activity %}<a class="activity-node {{ node.tone }}" href="/?view=agents&agent={{ node.id }}" title="{{ node.title }}" aria-label="{{ node.title }}"></a>{% endfor %}
+          </div>
+          <div class="activity-legend"><span><i class="dot running"></i>执行中</span><span><i class="dot idle"></i>待命</span><span><i class="dot waiting_input"></i>等待输入</span><span><i class="dot failed"></i>异常</span></div>
+        </div>
+      </section>
+
+      <section class="metric-strip" aria-label="平台概况">
+        <article><span>托管会话</span><strong id="metric-total">{{ managed_count }}</strong></article>
+        <article><span>执行中</span><strong id="metric-running">{{ running_count }}</strong></article>
+        <article><span>等待输入</span><strong id="metric-waiting">{{ waiting_count }}</strong></article>
+        <article><span>异常</span><strong id="metric-faulted">{{ faulted_count }}</strong></article>
+        <article><span>可用载体</span><strong id="metric-carriers">{{ carrier_available }}</strong></article>
+        <article><span>Skill 快照</span><strong id="metric-skills">{{ skill_count }}</strong></article>
+      </section>
+
+      <section id="agents-view" class="page-view{% if !view_agents %} hidden{% endif %}" aria-labelledby="agents-title">
+        <div class="view-heading">
+          <div><span class="overline">MANAGED INSTANCES</span><h2 id="agents-title">Agent 实例</h2></div>
+          <span id="agent-count" class="view-counter">{{ agent_total }} 个实例</span>
+        </div>
+        <div class="fleet-layout">
+          <aside class="fleet-panel" aria-label="Agent 列表">
+            <form class="filters" method="get" action="/">
+              <input type="hidden" name="view" value="agents">
+              <label class="search-field"><span class="sr-only">按名称或 ID 搜索</span><input id="filter" name="q" type="search" value="{{ filter_q }}" placeholder="搜索名称或 ID"></label>
+              <div class="filter-row">
+                <label><span class="sr-only">筛选载体</span><select id="carrier-filter" name="carrier">
+                  {% for option in carrier_filter_options %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+                </select></label>
+                <label><span class="sr-only">筛选状态</span><select id="status-filter" name="status">
+                  {% for option in status_filter_options %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+                </select></label>
+              </div>
+              <div class="filter-row"><button class="button button-secondary" type="submit">筛选</button><a class="button button-secondary" href="/?view=agents">重置</a></div>
+            </form>
+            <div id="agent-list" class="agent-list" aria-live="polite">
+              {% if agents.is_empty() %}<div class="list-empty">{{ list_empty }}</div>{% endif %}
+              {% for card in agents %}
+              <a class="agent-card{% if card.selected %} selected{% endif %}" href="/?view=agents&agent={{ card.id }}"{% if card.selected %} aria-current="true"{% endif %}>
+                <div class="card-top">
+                  <span class="card-carrier">{{ card.carrier_label }}</span>
+                  <span class="status-pill {{ card.status_tone }}"><i class="dot {{ card.status_tone }}" aria-hidden="true"></i>{{ card.status_label }}</span>
+                </div>
+                <strong class="card-name">{{ card.name }}</strong>
+                <code class="card-id" title="{{ card.id }}">{{ card.short_id }}</code>
+                <div class="card-meta"><span title="{{ card.model }}">{{ card.model }}</span><span>{{ card.policy }}</span></div>
+                <div class="card-foot"><span title="{{ card.recent_title }}">{{ card.recent }}</span><time>{{ card.created }}</time></div>
+              </a>
+              {% endfor %}
+            </div>
+          </aside>
+
+          <section id="detail" class="detail-panel" aria-live="polite" aria-label="Agent 详情">
+            {% if !detail_present %}
+            <div id="empty-state" class="empty-state">
+              <div class="empty-orbit" aria-hidden="true"><span></span></div>
+              <span class="overline">NO SELECTION</span>
+              <h3>选择一个 Agent</h3>
+              <p>从左侧查看实例详情，或创建新的 subagent。</p>
+            </div>
+            {% endif %}
+            {% if detail_present %}
+            <div id="agent-detail" class="agent-detail">
+              <div class="detail-head">
+                <div class="detail-identity">
+                  <span class="overline">INSTANCE DETAIL <span id="detail-carrier-tag" class="carrier-tag">{{ detail.carrier_label }}</span></span>
+                  <h3 id="detail-name">{{ detail.name }}</h3>
+                  <code id="detail-id">{{ detail.id }}</code>
+                </div>
+                <div class="detail-actions">
+                  <form method="post" action="/ui/agents/{{ detail.id }}/restart"><input type="hidden" name="_token" value="{{ token }}"><button class="button button-secondary" data-action="restart" type="submit"{% if !detail.can_restart %} disabled{% endif %}>重启</button></form>
+                  <form method="post" action="/ui/agents/{{ detail.id }}/abort"><input type="hidden" name="_token" value="{{ token }}"><button class="button button-secondary" data-action="abort" type="submit"{% if !detail.can_abort %} disabled{% endif %}>中止当前回合</button></form>
+                  <form method="post" action="/ui/agents/{{ detail.id }}/stop"><input type="hidden" name="_token" value="{{ token }}"><button class="button button-danger" data-action="stop" type="submit"{% if !detail.can_stop %} disabled{% endif %}>停止</button></form>
+                </div>
+              </div>
+
+              <div class="detail-status-line">
+                <span id="detail-status-indicator" class="status-pill {{ detail.status_tone }}"><i class="dot {{ detail.status_tone }}"></i><span id="detail-status">{{ detail.status_label }}</span></span>
+                <span>启动于 <time id="detail-created">{{ detail.created }}</time></span>
+                <span id="detail-updated-wrap">更新于 <time id="detail-updated">{{ detail.updated }}</time></span>
+              </div>
+
+              <div class="spec-grid">
+                <article><span>载体</span><strong id="detail-carrier">{{ detail.carrier }}</strong></article>
+                <article><span>模型</span><strong id="detail-model">{{ detail.model }}</strong></article>
+                <article><span>思考级别</span><strong id="detail-thinking">{{ detail.thinking }}</strong></article>
+                <article><span>进程 / 会话</span><code id="detail-process">{{ detail.process }}</code></article>
+                <article class="wide"><span>工作目录</span><code id="detail-cwd" title="{{ detail.cwd }}">{{ detail.cwd }}</code></article>
+                <article class="wide"><span>Skill 权限</span><strong id="detail-skill-policy">{{ detail.skill_policy_label }}</strong>
+                  <div id="detail-skill-list" class="permission-list">{% for chip in detail.skill_chips %}<span title="{{ chip.title }}">{{ chip.label }}</span>{% endfor %}</div>
+                </article>
+                <article class="wide"><span>System Prompt 追加</span><strong id="detail-prompt-summary" title="{{ detail.prompt_title }}">{{ detail.prompt_summary }}</strong>
+                  <div id="detail-prompt-list" class="permission-list">{% for chip in detail.prompt_chips %}<span title="{{ chip.title }}">{{ chip.label }}</span>{% endfor %}</div>
+                  {% if detail.prompt_details_visible %}<details id="detail-prompt-details" class="prompt-details"><summary>查看追加正文</summary><pre id="detail-prompt-text">{{ detail.prompt_text }}</pre></details>{% endif %}
+                </article>
+              </div>
+
+              {% if detail.has_error %}<div id="detail-error" class="error-panel" role="alert"><span>最近错误</span><p>{{ detail.last_error }}</p></div>{% endif %}
+
+              <section class="timeline-section">
+                <div class="subheading"><div><span class="overline">LIFECYCLE</span><h4>状态时间线</h4></div><small id="timeline-count">{{ detail.timeline_count }} 项</small></div>
+                <div id="timeline" class="timeline">
+                  {% if detail.timeline.is_empty() %}<p class="timeline-empty">当前状态：{{ detail.status_label }}。暂无生命周期事件。</p>{% endif %}
+                  {% for row in detail.timeline %}
+                  <div class="timeline-row"><i class="timeline-marker" aria-hidden="true"></i><div><strong>{{ row.label }}</strong><p>{{ row.summary }}</p></div><time>{{ row.time }}</time></div>
+                  {% endfor %}
+                </div>
+              </section>
+
+              <section class="events-section">
+                <div class="subheading"><div><span class="overline">EVENT STREAM</span><h4>最近事件</h4></div>
+                  {% if verbose %}<a class="toggle" href="{{ terse_href }}">收起原始数据</a>{% else %}<a class="toggle" href="{{ verbose_href }}">展开原始数据</a>{% endif %}
+                </div>
+                <div id="events" class="events">
+                  {% if detail.events.is_empty() %}<p class="event-empty">暂无事件。</p>{% endif %}
+                  {% for event in detail.events %}
+                  <article class="event-row"><time>{{ event.time }}</time><span class="event-type">{{ event.kind }}</span><span class="event-summary">{{ event.summary }}{% if !event.raw.is_empty() %}<pre>{{ event.raw }}</pre>{% endif %}</span></article>
+                  {% endfor %}
+                </div>
+              </section>
+
+              <form id="message-form" class="command-dock" method="post" action="/ui/agents/{{ detail.id }}/prompt">
+                <input type="hidden" name="_token" value="{{ token }}">
+                <label for="message">发送指令</label>
+                <textarea id="message" name="message" rows="3" placeholder="{{ detail.placeholder }}" required{% if !detail.can_send %} disabled{% endif %}></textarea>
+                <div class="command-actions">
+                  {% for kind in detail.message_kinds %}<button class="button button-primary" type="submit" formaction="/ui/agents/{{ detail.id }}/{{ kind.value }}"{% if !detail.can_send %} disabled{% endif %}>{{ kind.label }} ↗</button>{% endfor %}
+                </div>
+              </form>
+            </div>
+            {% endif %}
+          </section>
+        </div>
+      </section>
+
+      <section id="skills-view" class="page-view skills-view{% if !view_skills %} hidden{% endif %}" aria-labelledby="skills-title">
+        <div class="view-heading">
+          <div><span class="overline">PRIVATE SNAPSHOTS</span><h2 id="skills-title">Skill 广场</h2></div>
+          <span id="skill-count" class="view-counter">{{ skill_count }} 份快照</span>
+        </div>
+        <p class="view-intro">这里列出已导入平台私有存储的 Skill 快照。创建 Agent 时可授权全部或仅授权指定快照；已运行实例的授权不会因新导入而改变。</p>
+        <div id="skill-manager" class="skill-manager" aria-live="polite">
+          <div class="skill-manager-head">
+            <div><span class="overline">SKILLS MANAGER</span><h3>外部 Skill 库连接</h3></div>
+            <span class="manager-status {{ manager.tone }}">{{ manager.status_text }}</span>
+          </div>
+          {% if !manager.facts.is_empty() %}
+          <dl class="skill-manager-facts">{% for fact in manager.facts %}<dt>{{ fact.label }}</dt><dd title="{{ fact.value }}">{{ fact.value }}</dd>{% endfor %}</dl>
+          {% endif %}
+          <div class="skill-manager-actions">
+            <form method="post" action="/ui/skills/manager/connect"><input type="hidden" name="_token" value="{{ token }}"><button class="button button-primary" type="submit" data-manager-action="connect"{% if !manager.can_connect %} disabled{% endif %}>{% if manager.connected %}重新连接{% else %}连接 Skills Manager{% endif %}</button></form>
+            <form method="post" action="/ui/skills/manager/sync"><input type="hidden" name="_token" value="{{ token }}"><button class="button button-secondary" type="submit" data-manager-action="sync"{% if !manager.can_sync %} disabled{% endif %}>同步快照</button></form>
+            <form method="post" action="/ui/skills/manager/disconnect"><input type="hidden" name="_token" value="{{ token }}"><button class="button button-secondary" type="submit" data-manager-action="disconnect"{% if !manager.can_disconnect %} disabled{% endif %}>断开连接</button></form>
+          </div>
+          <p class="skill-manager-note">{{ manager.note }}</p>
+        </div>
+        <div id="skills-list" class="skills-list" aria-live="polite">
+          {% if skills.is_empty() %}
+          <div class="gallery-empty"><h3>广场尚无 Skill 快照</h3><p>确认首批清单并导入后，Skill 的来源、版本和摘要会显示在这里。</p></div>
+          {% endif %}
+          {% for skill in skills %}
+          <article class="skill-card">
+            <div class="skill-head"><span class="skill-glyph" aria-hidden="true">✳</span><code>{{ skill.version_label }}</code></div>
+            <h3>{{ skill.name }}</h3>
+            <code class="skill-id">{{ skill.id }}</code>
+            <dl>{% for fact in skill.facts %}<dt>{{ fact.label }}</dt><dd title="{{ fact.value }}">{{ fact.value }}</dd>{% endfor %}</dl>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section id="providers-view" class="page-view providers-view{% if !view_providers %} hidden{% endif %}" aria-labelledby="providers-title">
+        <div class="view-heading">
+          <div><span class="overline">PROVIDER ROUTING / CC SWITCH</span><h2 id="providers-title">供应商与模型</h2></div>
+          <a id="new-provider" class="button button-primary" href="?view=providers&amp;create-provider=1" data-dialog="provider-dialog">＋ 新增供应商</a>
+        </div>
+        <p class="view-intro">平台使用应用私有的 CC Switch CLI 分支管理三个载体的 API 地址、协议和模型列表。这里仅显示非敏感信息，API Key 不会回显。</p>
+        <div id="provider-switch-status" class="provider-status{% if provider_status_ready %} ready{% else %} unavailable{% endif %}" role="status" aria-live="polite">{{ provider_status_text }}</div>
+        <div id="provider-apps" class="provider-apps" aria-live="polite">
+          {% for block in provider_blocks %}
+          <section class="provider-app">
+            <div class="provider-app-head">
+              <div><span class="overline">{{ block.app_id }}</span><h3>{{ block.app_label }}</h3></div>
+              <span class="view-counter">{{ block.count_label }}</span>
+            </div>
+            <p class="provider-app-note">{{ block.note }}</p>
+            {% if block.rows.is_empty() %}<p class="provider-empty">{{ block.empty_text }}</p>{% endif %}
+            {% if !block.rows.is_empty() %}
+            <div class="provider-grid">
+              {% for provider in block.rows %}
+              <article class="provider-card">
+                <div class="provider-card-top">
+                  <div class="provider-card-name"><h4>{{ provider.name }}</h4><code>{{ provider.id }}</code></div>
+                  <span class="provider-badge{{ provider.badge_class }}">{{ provider.badge }}</span>
+                </div>
+                <dl class="provider-facts">{% for fact in provider.facts %}<dt>{{ fact.label }}</dt><dd title="{{ fact.value }}">{{ fact.value }}</dd>{% endfor %}</dl>
+                <div class="provider-models">
+                  <span>{{ provider.models_label }}</span>
+                  <div class="provider-model-chips">{% if provider.models.is_empty() %}<small>未配置模型</small>{% endif %}{% for model in provider.models %}<code title="{{ model }}">{{ model }}</code>{% endfor %}</div>
+                </div>
+                {% if provider.unconfigured %}<p class="provider-unconfigured-note">官方预设尚缺 API 地址、Key 或模型，不能用于创建 Agent 或切换。</p>{% endif %}
+                {% if block.app_id != "pi" %}
+                <form method="post" action="/ui/providers/{{ block.app_id }}/{{ provider.id }}/switch"><input type="hidden" name="_token" value="{{ token }}"><button class="button button-secondary provider-switch-button" type="submit"{% if !provider.action_enabled %} disabled{% endif %}>{{ provider.action_label }}</button></form>
+                {% endif %}
+              </article>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </section>
+          {% endfor %}
+        </div>
+      </section>
+
+      {% for warning in warnings %}<p class="provider-status unavailable">{{ warning }}</p>{% endfor %}
+    </main>
+
+    <dialog id="create-dialog" aria-labelledby="create-title"{% if create_open %} open{% endif %}>
+      <form id="create-form" method="post" action="/ui/agents/create">
+        <input type="hidden" name="_token" value="{{ token }}">
+        <div class="dialog-head"><div><span class="overline">CREATE INSTANCE</span><h2 id="create-title">创建 Agent</h2></div><button class="close-button" type="button" data-close-dialog aria-label="关闭">×</button></div>
+        <div class="form-row">
+          <label>名称<input name="name" required placeholder="例如：reviewer-a" autocomplete="off"></label>
+          <label>载体<select id="create-carrier" name="carrier" required>
+            {% for option in create_carriers %}<option value="{{ option.value }}"{% if option.disabled %} disabled{% endif %}>{{ option.label }}</option>{% endfor %}
+          </select></label>
+        </div>
+        <div id="carrier-availability" class="carrier-availability" aria-label="载体可用状态">
+          {% for row in create_carrier_rows %}<div class="carrier-availability-row"><strong>{{ row.label }}</strong><span class="{% if row.available %}available{% else %}unavailable{% endif %}">{{ row.detail }}</span></div>{% endfor %}
+        </div>
+        <label>工作目录<input name="cwd" required placeholder="/absolute/path/to/project" autocomplete="off"></label>
+        <div class="form-row">
+          <label>供应商 <small>来自 CC Switch 已配置条目</small><select id="create-provider" name="provider">
+            {% for option in create_providers %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+          </select></label>
+          <label>模型 <small>由所选供应商提供</small><select id="create-model" name="model-choice">
+            {% for option in create_models %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+          </select></label>
+        </div>
+        <div class="form-row">
+          <label>手工模型 ID <small>可选；填写后覆盖上方模型</small><input id="create-model-manual" name="model-manual" placeholder="model-id" autocomplete="off"></label>
+          <label>思考级别<select id="create-thinking" name="thinking">
+            {% for option in thinking_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+          </select><small>Codex 使用供应商配置，不下发逐 Agent 覆盖。</small></label>
+        </div>
+        <fieldset class="policy-fieldset">
+          <legend>Skill 自动加载范围</legend>
+          <label class="policy-option"><input type="radio" name="skill-mode" value="all" checked><span><strong>全部 Skill</strong><small>授权当前广场中的所有快照。默认选择。</small></span></label>
+          <label class="policy-option"><input type="radio" name="skill-mode" value="only"><span><strong>仅加载指定 Skill</strong><small>未勾选时，平台不为该 Agent 加载 Skill。</small></span></label>
+          <div id="create-skill-selector" class="skill-selector">
+            <div id="create-skill-options">
+              {% if create_skills.is_empty() %}<p class="skill-selector-empty">尚无已导入 Skill。选择“仅指定”将创建无 Skill 的 Agent。</p>{% endif %}
+              {% for skill in create_skills %}<label class="skill-check"><input type="checkbox" name="skill-id" value="{{ skill.id }}"><span><strong>{{ skill.name }}</strong><small>{{ skill.detail }}</small></span></label>{% endfor %}
+            </div>
+          </div>
+          <p class="policy-boundary-note">仅限制平台配置的 Skill 自动发现和加载；不隔离文件、凭据、网络或载体内置能力。</p>
+        </fieldset>
+        <fieldset class="policy-fieldset" id="prompt-fieldset">
+          <legend>System Prompt 追加</legend>
+          <p class="form-note">{{ prompt_note }}</p>
+          <div id="create-principles" class="prompt-principles">
+            {% if principles.is_empty() %}<p class="skill-selector-empty">原则目录不可用，本次创建将不追加系统提示。</p>{% endif %}
+            {% for principle in principles %}<label class="skill-check"><input type="checkbox" name="principle" value="{{ principle.id }}"{% if principle.checked %} checked{% endif %}><span><strong>{{ principle.title }}</strong><small>{{ principle.text }}</small></span></label>{% endfor %}
+          </div>
+          <label>自定义追加正文 <small>可选，可多行；不会被 shell 执行</small><textarea name="system-prompt" rows="3" placeholder="对该 Agent 的额外要求…"></textarea></label>
+        </fieldset>
+        <label>初始任务 <small>可留空</small><textarea name="prompt" rows="4" placeholder="创建后立即发送的任务…"></textarea></label>
+        <p class="form-note">Skill 加载清单在创建时固定。这不限制 Agent 读取工作目录、其他文件、凭据或访问网络。</p>
+        <div class="dialog-actions"><button class="button button-secondary" type="button" data-close-dialog>取消</button><button id="create-submit" class="button button-primary" type="submit">创建 Agent ↗</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="provider-dialog" aria-labelledby="provider-dialog-title"{% if provider_open %} open{% endif %}>
+      <form id="provider-form" method="post" action="/ui/providers/add">
+        <input type="hidden" name="_token" value="{{ token }}">
+        <div class="dialog-head"><div><span class="overline">CC SWITCH / PRIVATE CONFIG</span><h2 id="provider-dialog-title">新增供应商</h2></div><button id="provider-close" class="close-button" aria-label="关闭" type="button" data-close-dialog>×</button></div>
+        <div class="form-row">
+          <label>载体<select name="app" required><option value="pi">Pi Agent CLI</option><option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option></select></label>
+          <label>供应商 ID<input name="id" required maxlength="64" placeholder="例如：team-api" autocomplete="off" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" title="使用字母、数字、点、下划线或连字符"></label>
+        </div>
+        <label>显示名称<input name="name" required placeholder="例如：团队模型网关" autocomplete="off"></label>
+        <div class="form-row">
+          <label>API URL <small>HTTP(S) 地址，不含查询参数或凭据</small><input name="baseUrl" type="url" required placeholder="https://api.example.com/v1" autocomplete="off"></label>
+          <label>API 协议<select id="provider-api-format" name="apiFormat" required>
+            {% for option in api_formats %}<option value="{{ option.value }}" data-app="{{ option.app }}"{% if option.is_default %} data-default="1"{% endif %}{% if option.hidden %} hidden{% endif %}>{{ option.label }}</option>{% endfor %}
+          </select></label>
+        </div>
+        <label id="claude-auth-field" class="hidden">Claude 认证方式<select id="claude-auth-mode" name="authMode">
+          {% for option in claude_auth_modes %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+        </select></label>
+        <label>API Key / Token <small id="provider-key-note">仅用于本次保存请求，页面不会读取或显示已有凭据。</small><input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="输入新的 API Key 或 Token"></label>
+        <label>模型列表 <small>至少一个；一行一个模型 ID，也支持逗号分隔</small><textarea name="modelList" rows="4" required placeholder="model-a&#10;model-b" spellcheck="false"></textarea></label>
+        <label>默认模型 <small>留空时使用列表第一个；Pi 创建 Agent 时仍需指定模型</small><input name="defaultModel" placeholder="model-a" autocomplete="off"></label>
+        <div class="dialog-actions"><button id="provider-cancel" class="button button-secondary" type="button" data-close-dialog>取消</button><button id="provider-submit" class="button button-primary" type="submit">保存供应商 ↗</button></div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast{% if !toast.is_empty() %} show{{ toast_tone }}{% endif %}" role="status">{{ toast }}</div>
+    <script src="/app.js"></script>
+  </body>
+</html>

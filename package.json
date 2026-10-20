@@ -1,6 +1,6 @@
 {
   "name": "pi-subagent-hub",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "private": true,
   "description": "Local control plane for Pi, Codex, and Claude subagents",
   "author": "llwwds",
@@ -23,7 +23,8 @@
   "homepage": "https://github.com/llwwds/pi-subagent-hub#readme",
   "type": "module",
   "bin": {
-    "pihub": "bin/pihub.js"
+    "pihub": "bin/pihub",
+    "pihub-legacy": "bin/pihub.js"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -32,9 +33,13 @@
     "rotating-file-stream": "3.2.10"
   },
   "scripts": {
+    "build": "bash rust/scripts/build-release.sh",
+    "check": "bash rust/scripts/verify.sh",
+    "check:legacy": "node scripts/check-sources.js && node scripts/check-release.js && node --test test/*.test.js",
+    "test": "bash rust/scripts/verify.sh",
+    "test:legacy": "node --test test/*.test.js",
+    "legacy": "node bin/pihub.js",
     "bootstrap:pi": "node scripts/bootstrap-pi.js",
-    "test": "node --test test/*.test.js",
-    "check": "node scripts/check-sources.js && node scripts/check-release.js && node --test test/*.test.js",
     "smoke:pi": "node scripts/smoke-pi-rpc.js"
   }
 }

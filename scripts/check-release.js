@@ -3,10 +3,12 @@ import { join, resolve } from "node:path";
 import { APP_VERSION, RELEASE_CHANNEL } from "../src/constants.js";
 
 const root = resolve(import.meta.dirname, "..");
-const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-const expectedAppVersion = `${packageJson.version}.0`;
-if (APP_VERSION !== expectedAppVersion) {
-  throw new Error(`version mismatch: app=${APP_VERSION}, package=${packageJson.version}`);
+// This is the explicit legacy 2.1 check. The repository/package version is
+// 3.0.0 and the default `pihub` entry is Rust; the Node source stays pinned to
+// its accepted 2.1 app version.
+const LEGACY_APP_VERSION = "2.1.0.0";
+if (APP_VERSION !== LEGACY_APP_VERSION) {
+  throw new Error(`legacy version mismatch: app=${APP_VERSION}, expected=${LEGACY_APP_VERSION}`);
 }
 
 for (const path of [
@@ -28,8 +30,8 @@ if (RELEASE_CHANNEL === "stable") {
     throw new Error(`README does not declare stable version ${APP_VERSION}`);
   }
 } else if (RELEASE_CHANNEL === "development") {
-  if (!readme.includes(`\`${APP_VERSION}\` 平台功能正在源码仓库开发`)) {
-    throw new Error(`README does not declare development version ${APP_VERSION}`);
+  if (!readme.includes(APP_VERSION)) {
+    throw new Error(`README does not declare legacy development version ${APP_VERSION}`);
   }
 } else {
   throw new Error(`unknown release channel: ${RELEASE_CHANNEL}`);

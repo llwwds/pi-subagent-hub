@@ -1,0 +1,26 @@
+[package]
+name = "pihub-bin"
+description = "pi-subagent-hub executable assembly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pihub"
+path = "src/main.rs"
+
+[dependencies]
+pihub-app = { path = "../app" }
+pihub-contracts = { path = "../contracts" }
+pihub-core = { path = "../core" }
+pihub-runtime = { path = "../runtime" }
+async-trait.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

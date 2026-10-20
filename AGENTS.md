@@ -9,8 +9,11 @@
 
 ## 目录职责
 
-- `src/`：应用源码。
-- `test/`：自动化测试。
+- `rust/`：3.0 起的原生 Rust 工作区；`contracts` 定义共享契约，`core` 管理状态，`runtime` 适配载体，`app` 实现 CLI/HTTP/SSR，`bin` 负责装配。
+- `core`、`runtime`、`app` 彼此不依赖；只有 `bin` 装配三者，数据库与事件持久化由 daemon 的核心层统一持有。
+- `bin/pihub`：默认原生启动入口；不得静默回退到旧 Hub Node 实现。
+- `src/`、`test/`、`bin/pihub.js`：2.1 Node 版的显式 legacy 实现与回归测试；3.0 功能开发进入 `rust/`。
+- `rust/scripts/`：原生构建与验证入口；构建产物和依赖缓存必须放在同步源码目录之外。
 - `docs/`：与实现强绑定的架构、协议和部署说明。
 - `vendor/pi/`：独立上游 clone，不纳入本仓库版本管理。
 - `vendor/pi.lock.json`：上游来源、版本和提交的权威锁定记录。

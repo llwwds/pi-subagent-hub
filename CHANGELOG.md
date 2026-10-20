@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.0.0 - 2026-10-21（Rust 本地 development，未发布/未部署）
+
+- Rewrote the application-owned runtime layer in Rust under `rust/`: CLI, daemon, SQLite store, prompts, skill registry, Skills Manager connection, Pi/Codex/Claude carriers, CC Switch wrapper, loopback HTTP API and Rust SSR dashboard.
+- Kept the accepted 2.1 Node implementation only as a read-only behavioral reference; the Rust binary does not invoke the old Hub Node implementation. External Pi/Codex/Claude executables remain external dependencies.
+- Added one Cargo workspace with five packages (`pihub-contracts`, `pihub-core`, `pihub-runtime`, `pihub-app`, `pihub-bin`) and a single locked dependency graph.
+- Preserved 2.1 contracts: schema/migrations/update allowlist/cursors, 8-delta + 32-wrapper filtering, distinct prompt/skill digests, UTF-16 limits, literal/canonical manager path alias rules, v1/v2 views, daemon state files and graceful stop.
+- Added native CLI/daemon integration coverage under a private `/tmp` home; ordinary CLI paths use only `LocalOps` + loopback HTTP, while only the hidden `__daemon` branch constructs core/runtime.
+- Switched the repository default `pihub` entry to a Rust launcher (`bin/pihub`) with an explicit `pihub-legacy` Node 2.1 entry; the launcher fails closed with build instructions when no native binary exists and never silently falls back to Node.
+- Set npm metadata to `3.0.0`, synchronized `package-lock.json`, and added `docs/releases/v3.0.0.0.md` plus a Cargo-only build/verify entry that uses existing Cargo without machine-specific toolchain paths.
+- Scope note: local development only. No GitHub Release, deployment, production switch, remote push or Git tag/commit was performed by this work.
+
 ## 2.1.0.0 - 2026-10-20（源码状态，未发布）
 
 - Added multi-carrier support for Pi, Codex CLI, and Claude Code CLI behind one create/prompt/event/stop surface.

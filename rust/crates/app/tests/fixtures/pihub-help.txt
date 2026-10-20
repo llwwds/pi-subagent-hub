@@ -1,0 +1,38 @@
+pi-subagent-hub 3.0.0.0
+
+Usage:
+  pihub daemon start|stop|status [--json]
+  pihub spawn --name NAME --cwd DIR [--model PROVIDER/MODEL] [--thinking LEVEL] [--prompt TEXT] [--json]
+  pihub spawn --manifest FILE|- [--json]
+  pihub list|ps [--json]
+  pihub inspect AGENT_ID [--json]
+  pihub prompt|send AGENT_ID [TEXT|--stdin] [--json]
+  pihub steer AGENT_ID [TEXT|--stdin] [--json]
+  pihub follow-up AGENT_ID [TEXT|--stdin] [--json]
+  pihub abort|stop|restart AGENT_ID [--json]
+  pihub wait AGENT_ID... [--timeout SECONDS] [--json]
+  pihub logs AGENT_ID [--after CURSOR] [--json]
+  pihub panel [--no-open]
+  pihub doctor [--json]
+  pihub config init|validate|paths [--json]
+  pihub carriers list [--json]
+  pihub providers list [--json]
+  pihub providers add --stdin [--json]  # JSON with app, URL, models and API key
+  pihub providers switch --app pi|codex|claude --id ID [--json]
+  pihub skills list|import --id ID --source DIR [--label NAME] [--json]
+  pihub skills manager status|connect|sync|disconnect [--cli-path FILE] [--preset ID,ID] [--ids ID,ID] [--tags TAG,TAG] [--json]
+  pihub prompts list [--json]
+  pihub agents create --carrier pi|codex|claude --name NAME --cwd DIR [--skills all|none|ID,ID] [--principles all|none|ID,ID] [--system-prompt TEXT|--system-prompt-file FILE|--system-prompt-stdin] [--json]
+  pihub agents create --manifest FILE|- [--json]
+  pihub agents list|inspect AGENT_ID [--json]
+  pihub agents prompt AGENT_ID [TEXT|--stdin] [--json]
+  pihub agents wait AGENT_ID... [--timeout SECONDS] [--json]
+  pihub agents logs AGENT_ID [--after CURSOR] [--json]
+  pihub agents abort|stop|restart AGENT_ID [--json]
+
+Machine interface:
+  --json keeps stdout as one stable JSON envelope. Diagnostics go to stderr.
+  Long prompts should use --stdin to avoid shell quoting and command-history exposure.
+  System prompt text is never executed: it is passed as one argv element or read from
+  a file/stdin. Long multi-line text should use --system-prompt-file or
+  --system-prompt-stdin for the same reason.
