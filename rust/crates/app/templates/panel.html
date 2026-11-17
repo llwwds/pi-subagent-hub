@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-skin="cloud" data-atmosphere="balanced">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="pihub-token" content="{{ token }}">
-    <meta name="theme-color" content="#08090b">
+    <meta name="theme-color" content="#d6e8ec">
     <title>Subagent Hub · 控制台</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
@@ -29,18 +29,11 @@
     <main>
       <section class="overview" aria-labelledby="overview-title">
         <div class="overview-main">
-          <span class="overline">LIVE FLEET / 实时状态</span>
+          <span class="overline">实时状态</span>
           <h1 id="overview-title"><span id="hero-active">{{ active_count }}</span><span class="hero-caption">个 Agent 进程<br>在运行</span></h1>
           <p>查看每个实例的载体、状态与 Skill 权限。托管会话单独统计。</p>
         </div>
-        <div class="activity-panel" aria-label="Agent 状态分布">
-          <div class="activity-head"><span>ACTIVITY</span><span id="last-sync">同步于 {{ last_sync }}</span></div>
-          <div id="activity-track" class="activity-track">
-            {% if activity_empty %}<span class="activity-empty">暂无实例</span>{% endif %}
-            {% for node in activity %}<a class="activity-node {{ node.tone }}" href="/?view=agents&agent={{ node.id }}" title="{{ node.title }}" aria-label="{{ node.title }}"></a>{% endfor %}
-          </div>
-          <div class="activity-legend"><span><i class="dot running"></i>执行中</span><span><i class="dot idle"></i>待命</span><span><i class="dot waiting_input"></i>等待输入</span><span><i class="dot failed"></i>异常</span></div>
-        </div>
+        <div class="overview-aside"><span class="overline">本地控制台</span><span id="last-sync">同步于 {{ last_sync }}</span></div>
       </section>
 
       <section class="metric-strip" aria-label="平台概况">
@@ -53,13 +46,31 @@
       </section>
 
       <section id="agents-view" class="page-view{% if !view_agents %} hidden{% endif %}" aria-labelledby="agents-title">
-        <div class="view-heading">
-          <div><span class="overline">MANAGED INSTANCES</span><h2 id="agents-title">Agent 实例</h2></div>
-          <span id="agent-count" class="view-counter">{{ agent_total }} 个实例</span>
-        </div>
         <div class="fleet-layout">
-          <aside class="fleet-panel" aria-label="Agent 列表">
-            <form class="filters" method="get" action="/">
+          <div class="agent-stage" aria-labelledby="agents-title">
+            <div class="stage-toolbar">
+              <div class="stage-intro">
+                <span class="overline">Agent 看板</span>
+                <h2 id="agents-title">让每个 Agent 清晰可见。</h2>
+                <p>查看状态，选择一个实例继续工作。</p>
+              </div>
+              <div class="stage-controls" aria-label="看板显示设置" hidden>
+                <div class="control-group"><span class="control-label">看板样式</span><div class="segmented-control" role="group" aria-label="看板样式">
+                  <button type="button" data-preference="skin" data-value="cloud" aria-pressed="true">云野星群</button>
+                  <button type="button" data-preference="skin" data-value="flow" aria-pressed="false">状态气流</button>
+                </div></div>
+                <div class="control-group"><span class="control-label">画作氛围</span><div class="segmented-control" role="group" aria-label="画作氛围">
+                  <button type="button" data-preference="atmosphere" data-value="subtle" aria-pressed="false">轻盈</button>
+                  <button type="button" data-preference="atmosphere" data-value="balanced" aria-pressed="true">平衡</button>
+                  <button type="button" data-preference="atmosphere" data-value="immersive" aria-pressed="false">沉浸</button>
+                </div></div>
+                <div class="control-group"><span class="control-label">展示范围</span><div class="segmented-control" role="group" aria-label="展示范围">
+                  <button type="button" data-scope="active" aria-pressed="true">活跃与关注</button>
+                  <button type="button" data-scope="all" aria-pressed="false">全部实例</button>
+                </div></div>
+              </div>
+            </div>
+            <form class="filters stage-filters" method="get" action="/">
               <input type="hidden" name="view" value="agents">
               <label class="search-field"><span class="sr-only">按名称或 ID 搜索</span><input id="filter" name="q" type="search" value="{{ filter_q }}" placeholder="搜索名称或 ID"></label>
               <div class="filter-row">
@@ -72,34 +83,48 @@
               </div>
               <div class="filter-row"><button class="button button-secondary" type="submit">筛选</button><a class="button button-secondary" href="/?view=agents">重置</a></div>
             </form>
-            <div id="agent-list" class="agent-list" aria-live="polite">
-              {% if agents.is_empty() %}<div class="list-empty">{{ list_empty }}</div>{% endif %}
-              {% for card in agents %}
-              <a class="agent-card{% if card.selected %} selected{% endif %}" href="/?view=agents&agent={{ card.id }}"{% if card.selected %} aria-current="true"{% endif %}>
-                <div class="card-top">
-                  <span class="card-carrier">{{ card.carrier_label }}</span>
-                  <span class="status-pill {{ card.status_tone }}"><i class="dot {{ card.status_tone }}" aria-hidden="true"></i>{{ card.status_label }}</span>
+            <div class="stage-summary"><span id="fleet-visible-count">当前筛选结果</span><span id="agent-count">{{ agent_total }} 个实例</span></div>
+            <div class="fleet-scroll" tabindex="0" aria-label="Agent 看板，可滚动查看更多实例">
+              <div id="fleet-canvas" class="fleet-canvas">
+                <div id="agent-list" class="cloud-nodes">
+                  {% for card in agents %}
+                  <a class="fleet-node {{ card.status_tone }}{% if card.selected %} selected{% endif %}" data-agent-id="{{ card.id }}" data-tone="{{ card.status_tone }}" data-agent-name="{{ card.name }}" href="/?view=agents&agent={{ card.id }}" title="{{ card.name }} · {{ card.status_label }} · {{ card.carrier_label }}"{% if card.selected %} aria-current="true"{% endif %}>
+                    <span class="node-core" aria-hidden="true"><span></span></span>
+                    <span class="node-info"><strong class="node-label">{{ card.name }}</strong><span class="node-status">{{ card.status_label }}</span><span class="node-carrier">{{ card.carrier_label }}</span></span>
+                  </a>
+                  {% endfor %}
                 </div>
-                <strong class="card-name">{{ card.name }}</strong>
-                <code class="card-id" title="{{ card.id }}">{{ card.short_id }}</code>
-                <div class="card-meta"><span title="{{ card.model }}">{{ card.model }}</span><span>{{ card.policy }}</span></div>
-                <div class="card-foot"><span title="{{ card.recent_title }}">{{ card.recent }}</span><time>{{ card.created }}</time></div>
-              </a>
-              {% endfor %}
+                <div id="flow-lanes" class="flow-lanes" hidden>
+                  <section class="flow-lane" data-tone="running"><div class="flow-lane-head"><i class="dot running"></i><strong>执行中</strong><span class="flow-lane-count"></span></div><div class="flow-lane-nodes"></div></section>
+                  <section class="flow-lane" data-tone="waiting_input"><div class="flow-lane-head"><i class="dot waiting_input"></i><strong>等待输入</strong><span class="flow-lane-count"></span></div><div class="flow-lane-nodes"></div></section>
+                  <section class="flow-lane" data-tone="failed"><div class="flow-lane-head"><i class="dot failed"></i><strong>异常</strong><span class="flow-lane-count"></span></div><div class="flow-lane-nodes"></div></section>
+                  <section class="flow-lane" data-tone="pending"><div class="flow-lane-head"><i class="dot pending"></i><strong>状态变更中</strong><span class="flow-lane-count"></span></div><div class="flow-lane-nodes"></div></section>
+                  <section class="flow-lane" data-tone="idle"><div class="flow-lane-head"><i class="dot idle"></i><strong>待命</strong><span class="flow-lane-count"></span></div><div class="flow-lane-nodes"></div></section>
+                  <section class="flow-lane" data-tone="stopped"><div class="flow-lane-head"><i class="dot stopped"></i><strong>已停止</strong><span class="flow-lane-count"></span></div><div class="flow-lane-nodes"></div></section>
+                  <section class="flow-lane" data-tone="unknown"><div class="flow-lane-head"><i class="dot"></i><strong>未知</strong><span class="flow-lane-count"></span></div><div class="flow-lane-nodes"></div></section>
+                </div>
+                <p id="board-empty" class="fleet-empty"{% if !agents.is_empty() %} hidden{% endif %}>{{ list_empty }}</p>
+                <p id="scope-empty" class="fleet-empty" hidden>当前范围没有实例。可切换“全部实例”查看。</p>
+              </div>
             </div>
-          </aside>
+          </div>
 
-          <section id="detail" class="detail-panel" aria-live="polite" aria-label="Agent 详情">
+          <section id="detail" class="detail-panel detail-drawer" aria-live="polite" aria-label="Agent 详情">
             {% if !detail_present %}
             <div id="empty-state" class="empty-state">
               <div class="empty-orbit" aria-hidden="true"><span></span></div>
               <span class="overline">NO SELECTION</span>
               <h3>选择一个 Agent</h3>
-              <p>从左侧查看实例详情，或创建新的 subagent。</p>
+              <p>从看板选择实例，或创建新的 subagent。</p>
             </div>
             {% endif %}
             {% if detail_present %}
             <div id="agent-detail" class="agent-detail">
+              <div class="detail-navigation">
+                <a class="detail-close" href="{{ agents_href }}" data-detail-close aria-label="关闭详情">×</a>
+                <a class="detail-expand button button-secondary" href="/?view=agents&agent={{ detail.id }}#detail-page" data-detail-expand>打开完整详情 ↗</a>
+                <a class="detail-back button button-secondary" href="{{ agents_href }}" data-detail-back>← 返回看板</a>
+              </div>
               <div class="detail-head">
                 <div class="detail-identity">
                   <span class="overline">INSTANCE DETAIL <span id="detail-carrier-tag" class="carrier-tag">{{ detail.carrier_label }}</span></span>
@@ -134,7 +159,7 @@
                 </article>
               </div>
 
-              {% if detail.has_error %}<div id="detail-error" class="error-panel" role="alert"><span>最近错误</span><p>{{ detail.last_error }}</p></div>{% endif %}
+              <div id="detail-error-slot">{% if detail.has_error %}<div id="detail-error" class="error-panel" role="alert"><span>最近错误</span><p>{{ detail.last_error }}</p></div>{% endif %}</div>
 
               <section class="timeline-section">
                 <div class="subheading"><div><span class="overline">LIFECYCLE</span><h4>状态时间线</h4></div><small id="timeline-count">{{ detail.timeline_count }} 项</small></div>
@@ -199,7 +224,7 @@
           {% endif %}
           {% for skill in skills %}
           <article class="skill-card">
-            <div class="skill-head"><span class="skill-glyph" aria-hidden="true">✳</span><code>{{ skill.version_label }}</code></div>
+            <div class="skill-head"><span class="skill-glyph" aria-hidden="true">◇</span><code>{{ skill.version_label }}</code></div>
             <h3>{{ skill.name }}</h3>
             <code class="skill-id">{{ skill.id }}</code>
             <dl>{% for fact in skill.facts %}<dt>{{ fact.label }}</dt><dd title="{{ fact.value }}">{{ fact.value }}</dd>{% endfor %}</dl>
@@ -250,7 +275,7 @@
         </div>
       </section>
 
-      {% for warning in warnings %}<p class="provider-status unavailable">{{ warning }}</p>{% endfor %}
+      <div id="panel-warnings">{% for warning in warnings %}<p class="provider-status unavailable">{{ warning }}</p>{% endfor %}</div>
     </main>
 
     <dialog id="create-dialog" aria-labelledby="create-title"{% if create_open %} open{% endif %}>

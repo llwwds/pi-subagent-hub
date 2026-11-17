@@ -90,6 +90,16 @@ loopback HTTP client，不会打开 daemon 的 SQLite、不会执行
 完整开发环境，用 `scripts/qa-instance.sh start|status|stop`（强制显式 canonical
 私有 home，并做 receipt + daemon.json + health + 真实进程身份核验）。
 
+## 3.0 开发版面板
+
+Agents 首页以状态看板展示实例，默认显示活跃或需要关注的 Agent；切换“全部”可查看
+已停止的实例，也可以按名称、ID、载体或状态筛选。看板的“云野星群”和“状态气流”
+使用同一份实例数据；画作氛围另有三档，可与任一皮肤组合。外观选择仅保存在当前
+浏览器，不改变 Agent、服务端配置或其他浏览器的设置。
+
+点击 Agent 打开右侧详情，面板内可进入独立详情页查看事件并发送指令，再返回看板。
+创建、停止、重启等操作仍由面板原有表单提交，具体可用动作取决于实例状态和载体能力。
+
 ## 关键约束
 
 - 运行时事件经有界 channel 交给 core；runtime 不写 SQLite。

@@ -94,6 +94,9 @@ fn view_v2(id: &str, with_text: bool) -> AgentViewV2 {
 struct FakeApi {
     created: std::sync::Mutex<Vec<AgentSpec>>,
     manager_actions: std::sync::Mutex<Vec<String>>,
+    /// Let the panel tests exercise realistic populations and statuses without
+    /// creating real Agent processes or touching the daemon's database.
+    snapshot_agents: std::sync::Mutex<Option<Vec<AgentViewV2>>>,
     /// When set, every snapshot request answers with the *other* view shape,
     /// which exercises the app's view-mismatch handling.
     flip_snapshot_view: std::sync::Mutex<bool>,
@@ -165,18 +168,31 @@ impl HubApi for FakeApi {
             view
         };
         match view {
-            ApiView::V2 => Ok(Snapshot::V2(SnapshotV2 {
-                version: pihub_contracts::APP_VERSION.to_string(),
-                profile: pihub_contracts::ProfileView {
-                    name: "default".into(),
-                    digest: "profile-digest".into(),
-                    tools: vec!["read".into(), "bash".into()],
-                },
-                agents: vec![self.view(V2_ID, false), self.view("platform-agent-2", false)],
-                active_count: 2,
-                managed_count: 3,
-                event_cursor: 42,
-            })),
+            ApiView::V2 => {
+                let override_agents = self.snapshot_agents.lock().unwrap().clone();
+                let has_override = override_agents.is_some();
+                let agents = override_agents.unwrap_or_else(|| {
+                    vec![self.view(V2_ID, false), self.view("platform-agent-2", false)]
+                });
+                let active_count = if has_override {
+                    agents.iter().filter(|view| view.agent.status.is_active()).count()
+                } else {
+                    2
+                };
+                let managed_count = if has_override { agents.len() } else { 3 };
+                Ok(Snapshot::V2(SnapshotV2 {
+                    version: pihub_contracts::APP_VERSION.to_string(),
+                    profile: pihub_contracts::ProfileView {
+                        name: "default".into(),
+                        digest: "profile-digest".into(),
+                        tools: vec!["read".into(), "bash".into()],
+                    },
+                    agents,
+                    active_count,
+                    managed_count,
+                    event_cursor: 42,
+                }))
+            }
             ApiView::V1 => Ok(Snapshot::V1(pihub_contracts::SnapshotV1 {
                 version: pihub_contracts::APP_VERSION.to_string(),
                 profile: pihub_contracts::ProfileView {
@@ -1129,6 +1145,113 @@ async fn panel_page_injects_token_and_renders_all_views() {
 }
 
 #[tokio::test]
+async fn panel_board_exposes_real_agents_beyond_the_old_activity_limit() {
+    let api = Arc::new(FakeApi::default());
+    let agents = (0..65)
+        .map(|index| {
+            let mut view = view_v2(&format!("fleet-{index:02}"), false);
+            let status = match index {
+                0 => "running",
+                1 => "waiting_input",
+                2 => "failed",
+                3 => "stopped",
+                _ => "idle",
+            };
+            view.agent.status = status.parse().unwrap();
+            if !view.agent.status.is_active() {
+                view.agent.pid = None;
+            }
+            view
+        })
+        .collect();
+    *api.snapshot_agents.lock().unwrap() = Some(agents);
+    let harness = start_with(api).await;
+
+    let html = client()
+        .get(format!("{}/?view=agents", harness.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // Each node must retain its actual status and link to the correct Agent;
+    // in particular, the old 48-node activity summary must not truncate the
+    // main board. The all/active scope itself is exercised in a browser.
+    for (id, tone) in [
+        ("fleet-00", "running"),
+        ("fleet-01", "waiting_input"),
+        ("fleet-02", "failed"),
+        ("fleet-03", "stopped"),
+        ("fleet-64", "idle"),
+    ] {
+        let needle = format!("data-agent-id=\"{id}\"");
+        let index = html.find(&needle).unwrap_or_else(|| panic!("missing node for {id}"));
+        let start = html[..index].rfind('<').expect("node start tag");
+        let end = index + html[index..].find('>').expect("node end tag");
+        let node = &html[start..end];
+        assert!(node.contains(&format!("data-tone=\"{tone}\"")), "wrong status on {node}");
+        assert!(node.contains(&format!("agent={id}")), "wrong destination on {node}");
+    }
+
+    let filtered = client()
+        .get(format!("{}/?view=agents&q=fleet-64", harness.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(filtered.contains("data-agent-id=\"fleet-64\""));
+    assert!(!filtered.contains("data-agent-id=\"fleet-00\""));
+}
+
+#[tokio::test]
+async fn panel_offers_independent_board_and_atmosphere_controls() {
+    let harness = start().await;
+    let html = client()
+        .get(format!("{}/?view=agents", harness.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // The two independent controls make all six combinations reachable.
+    for (preference, value) in [
+        ("skin", "cloud"),
+        ("skin", "flow"),
+        ("atmosphere", "subtle"),
+        ("atmosphere", "balanced"),
+        ("atmosphere", "immersive"),
+    ] {
+        assert!(
+            html.split('>').any(|tag| {
+                tag.contains(&format!("data-preference=\"{preference}\""))
+                    && tag.contains(&format!("data-value=\"{value}\""))
+                    && tag.contains("aria-pressed=")
+            }),
+            "missing accessible {preference} choice {value}"
+        );
+    }
+    assert!(html.contains("data-scope=\"active\""));
+    assert!(html.contains("data-scope=\"all\""));
+    for (attribute, value) in [
+        ("data-value", "cloud"),
+        ("data-value", "balanced"),
+        ("data-scope", "active"),
+    ] {
+        let selected = html
+            .split('>')
+            .find(|tag| tag.contains(&format!("{attribute}=\"{value}\"")))
+            .unwrap();
+        assert!(selected.contains("aria-pressed=\"true\""), "unexpected default: {selected}");
+    }
+}
+
+#[tokio::test]
 async fn panel_detail_page_renders_the_frozen_prompt_body() {
     let harness = start().await;
     let response = client()
@@ -1140,6 +1263,8 @@ async fn panel_detail_page_renders_the_frozen_prompt_body() {
     assert!(html.contains("FROZEN-PROMPT-BODY"));
     assert!(html.contains("detail-prompt-text"));
     assert!(html.contains("agent_ready"));
+    assert!(html.contains("data-detail-expand"));
+    assert!(html.contains("data-detail-back"));
     // Message actions are plain form submit buttons, no bespoke JS.
     assert!(html.contains(&format!("/ui/agents/{V2_ID}/prompt")));
     assert!(html.contains(&format!("/ui/agents/{V2_ID}/steer")));
@@ -1163,7 +1288,8 @@ async fn static_assets_are_served_with_the_locked_csp() {
     );
     assert!(css.headers().get(header::CONTENT_SECURITY_POLICY).is_some());
     let body = css.text().await.unwrap();
-    assert!(body.contains("--background: #08090b"));
+    assert!(!body.trim().is_empty());
+    assert!(body.contains("prefers-reduced-motion"));
 
     let js = client()
         .get(format!("{}/app.js", harness.base))
