@@ -24,12 +24,33 @@
 
 ## 环境要求
 
-- Rust/Cargo：构建和测试 3.0 原生 Hub。当前在 macOS aarch64、Rust 1.99.1 实测；Linux/Windows 的 3.0 原生路径尚未验收。
+- Rust/Cargo `>=1.99`：构建和测试 3.0 原生 Hub。当前在 macOS aarch64、Rust 1.99.1 实测；Linux/Windows 的 3.0 原生路径尚未验收。
 - Node.js `>=22.19.0`：Pi 载体的外部 bundle 仍由 Node 执行；2.1 legacy 入口和测试也需要 Node。
 - Git；npm 仅用于 legacy、bootstrap 和 `npm link`。
 - 项目不自动安装工具链，不修改全局 PATH，不把构建缓存放进同步源。默认 target 在 `${TMPDIR:-/tmp}/pihub-rust-target`，可用 `CARGO_TARGET_DIR` 显式覆盖。
 
-## 快速开始（3.0 原生默认入口）
+## 快速上手
+
+### 交给你的 Agent 安装与配置
+
+把下面的提示词发给你正在使用的 Agent，即可让它检查环境、按仓库文档执行安装和验证，并引导你配置模型 API：
+
+```text
+请帮我安装并配置 pi-subagent-hub，项目地址：
+https://github.com/llwwds/pi-subagent-hub
+
+请先读取仓库 README 和项目说明，检查我的系统、依赖及现有安装，按当前仓库支持的步骤安装、验证并启动；不要覆盖已有实例或配置。请交互引导我配置模型 API，使用安全的凭据存储，不在对话、日志或代码中暴露密钥。最后告诉我启动方式、验证结果和未完成项。
+```
+
+给执行安装的 Agent：
+
+1. 先核对当前仓库版本与平台支持。当前 `main` 的 3.0 是本地 development 版本，不是已发布的稳定安装包；本仓库没有承诺可直接运行的远程一键安装脚本。
+2. 检查 Git、Node.js `>=22.19.0`、npm 和 Rust/Cargo `>=1.99`；缺失时向用户说明。检查是否已有 Pi、PiHub、同名源码目录或正在运行的实例，不覆盖或修改既有安装和数据。
+3. 在独立目录获取源码，按下方流程准备锁定版本的 Pi 运行时并构建 Hub；明确指定独立的源码、构建和状态路径，不让源码试用实例复用现有 `PIHUB_HOME` 或继承指向其他实例的 `PIHUB_APP_ROOT`、`PIHUB_RUST_BIN`。下方临时目录适合验证，若要持续使用，需要选用持久目录并记录启动所需路径。
+4. 执行 `config init`、`config validate` 和 `doctor`，检查返回内容；首次检查时 daemon 尚未启动是正常情况。启动后确认 daemon 和面板可用。配置校验通过不等于模型请求已经成功。
+5. 向用户询问供应商、模型和 API 配置方式，引导使用密钥管理器或受限配置文件。不要在聊天、日志、仓库或命令行参数中暴露密钥，也不要未经授权发送可能产生费用的模型请求。报告版本、源码和状态目录、启动方式、已验证与未验证项。
+
+### 从源码试用 3.0
 
 开发/试用请 **显式指定一个私有 home**。普通 CLI 按 `PIHUB_HOME` 解析 home，
 如果当前 shell 继承了在用实例的值（例如部署中的 2.0），直接执行 `daemon start` /
@@ -40,12 +61,17 @@
 git clone https://github.com/llwwds/pi-subagent-hub.git
 cd pi-subagent-hub
 
+# 显式隔离构建产物、状态和入口，避免继承其他实例的路径
+export CARGO_TARGET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pihub-build.XXXXXX")"
+export PIHUB_HOME="$(mktemp -d "${TMPDIR:-/tmp}/pihub-dev-home.XXXXXX")"
+export PIHUB_APP_ROOT="$PWD"
+export PIHUB_RUST_BIN="$CARGO_TARGET_DIR/release/pihub"
+
+# 首次获取锁定版本的 Pi 源码与外置运行时
+npm run bootstrap:pi
 # 使用现有 Cargo；不会自动安装或改 PATH
 npm run build
 # 等价：bash rust/scripts/build-release.sh
-
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${TMPDIR:-/tmp}/pihub-rust-target}"
-export PIHUB_HOME="$(mktemp -d /tmp/pihub-dev-home.XXXXXX)"
 
 ./bin/pihub config init --json
 ./bin/pihub config validate --json
@@ -75,7 +101,7 @@ scripts/qa-instance.sh stop   --home /tmp/pihub-rust-qa-<name>/hub \
 
 ```bash
 npm ci
-npm run bootstrap:pi       # 只服务于 legacy/external Pi
+npm run bootstrap:pi       # 准备锁定版本的外置 Pi 运行时
 npm run check:legacy       # 2.1 Node 源码检查与测试
 node bin/pihub.js --help   # 或：pihub-legacy --help / npm run legacy
 ```
