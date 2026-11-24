@@ -4,10 +4,10 @@
 
 当前源码包含两条线：
 
-- `3.0.0.0` Rust 自有运行层重写位于 [`rust/`](rust/README.md)：本地 development 状态，尚未发布 GitHub Release，也未部署到任何现有安装。
+- `3.0.0.0` Rust 自有运行层重写位于 [`rust/`](rust/README.md)，目前仍在开发中。
 - `2.1.0.0` Node 实现是已验收的行为参考（tag `v2.1.0.0`），用于对照，不再是 3.0 的默认执行路径。
 
-3.0 的构建、运行和隔离测试入口见 [`rust/README.md`](rust/README.md) 与 [`docs/rust-contracts.md`](docs/rust-contracts.md)。普通 CLI 只通过 loopback HTTP 访问 daemon；只有隐藏的 daemon 入口构造 Store/AgentManager/RuntimeFactory。源码与独立部署不自动同步：本仓库的改动不会进入、也不会替换任何现有部署，发布或部署需要单独的一次显式授权操作。
+3.0 的构建、运行和隔离测试入口见 [`rust/README.md`](rust/README.md) 与 [`docs/rust-contracts.md`](docs/rust-contracts.md)。普通 CLI 只通过 loopback HTTP 访问 daemon；只有隐藏的 daemon 入口构造 Store/AgentManager/RuntimeFactory。源码仓库与运行实例相互独立：修改源码后，需要按实例的安装方式自行构建和更新。
 
 `2.1.0.0` 平台功能包括 Pi、Codex CLI、Claude Code CLI 载体接口、Skill 快照目录、CC Switch 私有供应商配置、Skills Manager 手动连接、System Prompt 注入和 Hub 级诊断日志。新接口和现阶段可用范围见 [`docs/platform-api.md`](docs/platform-api.md)，面板使用说明见 [`docs/user-guide.md`](docs/user-guide.md)，System Prompt 见 [`docs/system-prompts.md`](docs/system-prompts.md)，日志见 [`docs/logging.md`](docs/logging.md)，Skills Manager 见 [`docs/skills-manager.md`](docs/skills-manager.md)。
 
@@ -24,10 +24,10 @@
 
 ## 环境要求
 
-- Rust/Cargo `>=1.99`：构建和测试 3.0 原生 Hub。当前在 macOS aarch64、Rust 1.99.1 实测；Linux/Windows 的 3.0 原生路径尚未验收。
+- Rust/Cargo `>=1.99`：构建和测试 3.0 原生 Hub。已验证 macOS aarch64、Rust 1.99.1；Linux/Windows 的 3.0 原生路径尚未验收。
 - Node.js `>=22.19.0`：Pi 载体的外部 bundle 仍由 Node 执行；2.1 legacy 入口和测试也需要 Node。
 - Git；npm 仅用于 legacy、bootstrap 和 `npm link`。
-- 项目不自动安装工具链，不修改全局 PATH，不把构建缓存放进同步源。默认 target 在 `${TMPDIR:-/tmp}/pihub-rust-target`，可用 `CARGO_TARGET_DIR` 显式覆盖。
+- 项目不自动安装工具链，也不修改全局 PATH。默认构建目录为 `${TMPDIR:-/tmp}/pihub-rust-target`，可用 `CARGO_TARGET_DIR` 显式指定。
 
 ## 快速上手
 
@@ -44,7 +44,7 @@ https://github.com/llwwds/pi-subagent-hub
 
 给执行安装的 Agent：
 
-1. 先核对当前仓库版本与平台支持。当前 `main` 的 3.0 是本地 development 版本，不是已发布的稳定安装包；本仓库没有承诺可直接运行的远程一键安装脚本。
+1. 先核对当前仓库版本与平台支持。`main` 的 3.0 仍在开发中；本仓库没有提供可直接运行的远程一键安装脚本。
 2. 检查 Git、Node.js `>=22.19.0`、npm 和 Rust/Cargo `>=1.99`；缺失时向用户说明。检查是否已有 Pi、PiHub、同名源码目录或正在运行的实例，不覆盖或修改既有安装和数据。
 3. 在独立目录获取源码，按下方流程准备锁定版本的 Pi 运行时并构建 Hub；明确指定独立的源码、构建和状态路径，不让源码试用实例复用现有 `PIHUB_HOME` 或继承指向其他实例的 `PIHUB_APP_ROOT`、`PIHUB_RUST_BIN`。下方临时目录适合验证，若要持续使用，需要选用持久目录并记录启动所需路径。
 4. 执行 `config init`、`config validate` 和 `doctor`，检查返回内容；首次检查时 daemon 尚未启动是正常情况。启动后确认 daemon 和面板可用。配置校验通过不等于模型请求已经成功。
@@ -52,10 +52,9 @@ https://github.com/llwwds/pi-subagent-hub
 
 ### 从源码试用 3.0
 
-开发/试用请 **显式指定一个私有 home**。普通 CLI 按 `PIHUB_HOME` 解析 home，
-如果当前 shell 继承了在用实例的值（例如部署中的 2.0），直接执行 `daemon start` /
-`daemon stop` 会操作那个实例。这里用临时目录隔离，不改 launcher 对 `PIHUB_HOME`
-的任何契约：
+开发或试用时请 **显式指定独立的 `PIHUB_HOME`**。CLI 使用该变量选择实例；
+如果当前 shell 沿用了已有实例的值，`daemon start` / `daemon stop` 会操作该实例。
+以下示例使用临时目录隔离，长期使用请改用持久目录：
 
 ```bash
 git clone https://github.com/llwwds/pi-subagent-hub.git
@@ -80,9 +79,9 @@ npm run build
 ./bin/pihub panel
 ```
 
-要跑带 daemon + panel 的真实开发环境，只用已核验的 QA helper（强制显式 canonical
-私有 home，并做 receipt + daemon.json + health + 真实进程身份核验，start/status/stop
-都不吃 ambient `PIHUB_HOME`）：
+如需运行带 daemon 和 panel 的隔离开发实例，可使用 QA helper。该脚本要求显式指定
+独立的绝对路径作为 home，并核验 receipt、daemon.json、健康状态及进程身份；
+start/status/stop 不使用环境中已有的 `PIHUB_HOME`：
 
 ```bash
 scripts/qa-instance.sh start  --home /tmp/pihub-rust-qa-<name>/hub \
@@ -106,7 +105,7 @@ npm run check:legacy       # 2.1 Node 源码检查与测试
 node bin/pihub.js --help   # 或：pihub-legacy --help / npm run legacy
 ```
 
-两者不会静默互相调用。3.0 的构建、运行和隔离测试入口见 [`rust/README.md`](rust/README.md)；正式 3.0 本地 development 说明见 [`docs/releases/v3.0.0.0.md`](docs/releases/v3.0.0.0.md)。
+两者不会静默互相调用。3.0 的构建、运行和隔离测试入口见 [`rust/README.md`](rust/README.md)；阶段记录见 [`docs/releases/v3.0.0.0.md`](docs/releases/v3.0.0.0.md)。
 
 ## AI API：只改一个配置文件
 
@@ -252,13 +251,13 @@ npm run smoke:pi      # legacy/external Pi RPC 冒烟，不发起付费模型请
 - `bin/pihub`：3.0 原生 launcher；`bin/pihub.js`：显式 2.1 legacy 入口。
 - `src/`、`test/`、`fixtures/`：2.1 Node 参考实现与对照测试。
 - `vendor/*.lock.json`、`vendor/pi-runtime.package-lock.json`：Pi 源码和运行时的可复现锁。
-- `docs/releases/v3.0.0.0.md`：本轮 3.0 本地 development 说明。
+- `docs/releases/v3.0.0.0.md`：3.0 版本和构建的阶段记录。
 
-源码仓库与正式部署副本不会自动同步；发布或部署必须显式执行，避免开发中的修改直接影响正在运行的应用。
+源码仓库的变更不会自动更新正在运行的实例；更新实例前请确认目标路径、版本和备份。
 
 ## 当前限制
 
-- 3.0 是本地 development 状态：独立 parity 与 Gemini SSR/DOM 验收仍在进行；未发布、未部署、未切换生产。
+- 3.0 仍在开发中；独立行为一致性与 SSR/DOM 验收范围见版本阶段记录。
 - 3.0 只实现 `shared` workspace mode；不实现进程池或 worktree。需要文件写入隔离时，请由调用方先准备不同工作目录。
 - 2.1 Node 代码保留为 legacy 参考；默认 `pihub` 不会再调用它。
 - skill/tool profile 在 agent 启动时冻结，运行中不热切换。
